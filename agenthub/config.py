@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = ""
     cors_origins: str = "*"  # 逗号分隔的来源列表，供前端控制台跨域调用
+    run_concurrency: int = 4  # 托管评测并发数：同时调用被测 Agent 的线程数
 
 
 @lru_cache

@@ -1,6 +1,6 @@
 // 设置页（UI-500）：UI-501 服务端配置状态只读展示 + UI-502 API Key 打码可复制 + SDK/CLI 接入片段
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Card, Descriptions, Space, Spin, Tabs, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Descriptions, Space, Spin, Tabs, Tag, Tooltip, Typography } from 'antd'
 import { EyeInvisibleOutlined, EyeOutlined, ReloadOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import type { ServerSettings } from '../api/types'
@@ -188,6 +188,19 @@ export default function SettingsPage() {
                 children: (
                   <Text code className="num">
                     {settings.cors_origins}
+                  </Text>
+                ),
+              },
+              {
+                key: 'run_concurrency',
+                label: (
+                  <Tooltip title="托管评测时同时调用被测 Agent 的线程数，环境变量 AGENTHUB_RUN_CONCURRENCY 可调">
+                    评测并发数（Agent 调用线程）
+                  </Tooltip>
+                ),
+                children: (
+                  <Text code className="num">
+                    {settings.run_concurrency ?? '—'}
                   </Text>
                 ),
               },

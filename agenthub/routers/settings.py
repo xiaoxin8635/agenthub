@@ -33,4 +33,5 @@ def show(settings: Settings = Depends(get_settings)):
         "data_dir": settings.data_dir,
         "db": settings.db,
         "cors_origins": settings.cors_origins,
+        "run_concurrency": settings.run_concurrency,
     })

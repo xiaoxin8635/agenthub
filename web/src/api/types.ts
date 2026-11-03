@@ -252,4 +252,5 @@ export interface ServerSettings {
   data_dir: string
   db: string
   cors_origins: string
+  run_concurrency?: number
 }

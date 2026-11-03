@@ -1,7 +1,7 @@
 import json
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from agenthub.config import get_settings
@@ -15,11 +15,22 @@ def _json_serializer(obj) -> str:
 def make_engine(db_url: str | None = None):
     url = db_url or get_settings().db
     if url.startswith("sqlite"):
-        return create_engine(
+        engine = create_engine(
             url,
             connect_args={"check_same_thread": False},
             json_serializer=_json_serializer,
         )
+
+        @event.listens_for(engine, "connect")
+        def _sqlite_pragma(dbapi_conn, _record):  # noqa: ANN001
+            """WAL：读写并行（执行器写结果时 UI 轮询不阻塞）；busy_timeout 缓解锁竞争。"""
+            cur = dbapi_conn.cursor()
+            cur.execute("PRAGMA journal_mode=WAL")
+            cur.execute("PRAGMA busy_timeout=5000")
+            cur.execute("PRAGMA synchronous=NORMAL")
+            cur.close()
+
+        return engine
     return create_engine(url, json_serializer=_json_serializer)
 
 
