@@ -1,4 +1,4 @@
-// 发起评测向导（UI-402）：①选数据集版本 ②选 Target ③选指标组合 ④确认摘要 → 提交跳 Run 详情
+﻿// 发起评测向导（UI-402）：①选数据集版本 ②选 Target ③选指标组合 ④确认摘要 → 提交跳 Run 详情
 import { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Input, Modal, Radio, Select, Space, Steps, Tag, Typography } from 'antd'
 import { api } from '../api/client'
@@ -23,7 +23,7 @@ function PickCard({
     <div
       onClick={onClick}
       style={{
-        border: `1px solid ${selected ? '#1677ff' : '#f0f0f0'}`,
+        border: `1px solid ${selected ? '#1677ff' : 'rgba(128,128,128,0.25)'}`,
         borderRadius: 8,
         padding: '10px 14px',
         marginBottom: 10,

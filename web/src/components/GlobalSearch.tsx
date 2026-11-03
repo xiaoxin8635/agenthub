@@ -1,8 +1,7 @@
 // 顶部全局搜索（06 文档第 3 节站点地图）：资产内容关键词 / 数据集名称 / Run id 前缀，
 // 防抖 300ms，三类实体分组展示，选中直达详情。
 import { useEffect, useRef, useState } from 'react'
-import { AutoComplete, Input, Tag } from 'antd'
-import { SearchOutlined } from '@ant-design/icons'
+import { AutoComplete, Tag } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Asset, DatasetBrief, RunSummary } from '../api/types'
@@ -97,6 +96,18 @@ export default function GlobalSearch() {
 
   return (
     <AutoComplete
+      ref={(el) => {
+        // 注册全局 ⌘K / Ctrl+K 快捷键聚焦搜索（仅注册一次）
+        if (el && !(window as unknown as { __ahKbd?: boolean }).__ahKbd) {
+          ;(window as unknown as { __ahKbd?: boolean }).__ahKbd = true
+          window.addEventListener('keydown', (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+              e.preventDefault()
+              el.focus()
+            }
+          })
+        }
+      }}
       style={{ width: 280 }}
       value={value}
       options={groups}
@@ -107,8 +118,8 @@ export default function GlobalSearch() {
         nav(url)
       }}
       popupMatchSelectWidth={420}
-    >
-      <Input size="small" prefix={<SearchOutlined />} placeholder="搜索资产 / 数据集 / Run id" allowClear />
-    </AutoComplete>
+      placeholder="搜索资产 / 数据集 / Run id（Ctrl K）"
+      allowClear
+    />
   )
 }

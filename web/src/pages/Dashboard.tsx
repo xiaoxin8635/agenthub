@@ -9,6 +9,19 @@ import PassRate from '../components/PassRate'
 import StatusBadge from '../components/StatusBadge'
 import EmptyGuide from '../components/EmptyGuide'
 import { fmtTime } from '../utils/format'
+import { useCountUp } from '../utils/useCountUp'
+import { useTheme } from '../theme'
+
+/** 图表通用暗色适配 + 入场动画配置 */
+function chartTheme(isDark: boolean) {
+  return {
+    axisLabel: isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)',
+    splitLine: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+    animationDuration: 600,
+    animationDurationUpdate: 300,
+    animationEasing: 'cubicOut' as const,
+  }
+}
 
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null)
@@ -31,6 +44,11 @@ export default function Dashboard() {
   useEffect(() => {
     void load()
   }, [])
+
+  // 指标卡数字滚动（数据就绪后从 0 缓动到目标值）
+  const nAssets = useCountUp(stats?.counts.assets ?? 0)
+  const nDatasets = useCountUp(stats?.counts.datasets ?? 0)
+  const nRuns = useCountUp(stats?.counts.runs ?? 0)
 
   // 近 30 天平均通过率（按 Run 数加权）
   const avgPassRate = useMemo(() => {
@@ -85,15 +103,15 @@ export default function Dashboard() {
       {/* UI-101 指标卡 */}
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} lg={6}>
-          <Card loading={loading}>
-            <Statistic title="数据资产" value={stats?.counts.assets ?? 0} />
+          <Card loading={loading} className="lift-card">
+            <Statistic title="数据资产" value={Math.round(nAssets)} />
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card loading={loading}>
+          <Card loading={loading} className="lift-card">
             <Statistic
               title="评测数据集"
-              value={stats?.counts.datasets ?? 0}
+              value={Math.round(nDatasets)}
               suffix={
                 <span style={{ fontSize: 14, color: '#8c8c8c' }}>
                   / {stats?.counts.dataset_versions ?? 0} 个版本
@@ -103,12 +121,12 @@ export default function Dashboard() {
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card loading={loading}>
-            <Statistic title="评测 Run" value={stats?.counts.runs ?? 0} />
+          <Card loading={loading} className="lift-card">
+            <Statistic title="评测 Run" value={Math.round(nRuns)} />
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card loading={loading}>
+          <Card loading={loading} className="lift-card">
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
               <Progress
                 type="circle"
@@ -118,7 +136,7 @@ export default function Dashboard() {
                 format={() => (avgPassRate == null ? '—' : `${(avgPassRate * 100).toFixed(0)}%`)}
               />
               <div>
-                <div style={{ color: 'rgba(0,0,0,.45)' }}>平均通过率（近 30 天）</div>
+                <div style={{ color: '#8c8c8c' }}>平均通过率（近 30 天）</div>
                 <div style={{ color: '#8c8c8c', fontSize: 12 }}>
                   基于 {stats?.trend_30d.reduce((n, t) => n + t.runs, 0) ?? 0} 次已完成评测
                 </div>
@@ -174,11 +192,16 @@ export default function Dashboard() {
 
 function TrendChart({ trend }: { trend: Stats['trend_30d'] }) {
   const ref = useRef<HTMLDivElement>(null)
+  const { isDark } = useTheme()
 
   useEffect(() => {
     if (ref.current === null) return
     const chart = echarts.init(ref.current)
+    const th = chartTheme(isDark)
     chart.setOption({
+      animationDuration: th.animationDuration,
+      animationDurationUpdate: th.animationDurationUpdate,
+      animationEasing: th.animationEasing,
       grid: { left: 56, right: 24, top: 24, bottom: 36 },
       tooltip: {
         trigger: 'axis',
@@ -192,12 +215,15 @@ function TrendChart({ trend }: { trend: Stats['trend_30d'] }) {
         type: 'category',
         data: trend.map((t) => t.date.slice(5)),
         boundaryGap: false,
+        axisLabel: { color: th.axisLabel },
+        axisLine: { lineStyle: { color: th.splitLine } },
       },
       yAxis: {
         type: 'value',
         min: 0,
         max: 100,
-        axisLabel: { formatter: '{value}%' },
+        axisLabel: { formatter: '{value}%', color: th.axisLabel },
+        splitLine: { lineStyle: { color: th.splitLine } },
       },
       series: [
         {
@@ -222,7 +248,7 @@ function TrendChart({ trend }: { trend: Stats['trend_30d'] }) {
       window.removeEventListener('resize', onResize)
       chart.dispose()
     }
-  }, [trend])
+  }, [trend, isDark])
 
   return <div ref={ref} style={{ height: 280 }} />
 }

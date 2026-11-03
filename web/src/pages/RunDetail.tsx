@@ -5,6 +5,7 @@ import { Alert, Card, Col, Progress, Row, Space, Spin, Statistic, Table, Tabs, T
 import echarts from '../utils/echarts'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { useTheme } from '../theme'
 import type { DatasetItem, RunDetail as RunDetailType, RunSummaryData } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
 import RunCasesTable from '../components/RunCasesTable'
@@ -15,13 +16,19 @@ import { fmtTime, scoreTone, TONE_COLOR } from '../utils/format'
 /** 指标分布条形图（UI-403）：每指标 avg（×100）+ n，N/A 灰「—」 */
 function MetricBarChart({ metrics }: { metrics: RunSummaryData['metrics'] }) {
   const ref = useRef<HTMLDivElement>(null)
+  const { isDark } = useTheme()
   const entries = Object.entries(metrics)
 
   useEffect(() => {
     if (ref.current === null || entries.length === 0) return
+    const axisLabel = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)'
+    const splitLine = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'
     const chart = echarts.init(ref.current)
     const sorted = [...entries].sort((a, b) => (b[1].avg ?? 0) - (a[1].avg ?? 0))
     chart.setOption({
+      animationDuration: 600,
+      animationDurationUpdate: 300,
+      animationEasing: 'cubicOut',
       grid: { left: 130, right: 70, top: 10, bottom: 28 },
       tooltip: {
         trigger: 'item',
@@ -37,11 +44,11 @@ function MetricBarChart({ metrics }: { metrics: RunSummaryData['metrics'] }) {
             .join('<br/>')
         },
       },
-      xAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%' } },
+      xAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%', color: axisLabel }, splitLine: { lineStyle: { color: splitLine } } },
       yAxis: {
         type: 'category',
         data: sorted.map(([type]) => type),
-        axisLabel: { fontSize: 11 },
+        axisLabel: { fontSize: 11, color: axisLabel },
       },
       series: [
         {
@@ -54,7 +61,7 @@ function MetricBarChart({ metrics }: { metrics: RunSummaryData['metrics'] }) {
               const m = sorted[p.dataIndex][1]
               return m.avg == null ? '—' : `${(m.avg * 100).toFixed(1)}%`
             },
-            color: '#595959',
+            color: axisLabel,
             fontFamily: 'monospace',
           },
           data: sorted.map(([, m]) => {
@@ -73,7 +80,7 @@ function MetricBarChart({ metrics }: { metrics: RunSummaryData['metrics'] }) {
       window.removeEventListener('resize', onResize)
       chart.dispose()
     }
-  }, [entries])
+  }, [entries, isDark])
 
   const height = Math.max(entries.length * 44 + 40, 120)
   return <div ref={ref} style={{ height }} />

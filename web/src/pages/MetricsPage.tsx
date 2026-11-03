@@ -1,4 +1,4 @@
-// 指标与目标管理（UI-407）：Target 列表+新建 / MetricConfig 列表+新建（指标动态行，按类型渲染参数）
+﻿// 指标与目标管理（UI-407）：Target 列表+新建 / MetricConfig 列表+新建（指标动态行，按类型渲染参数）
 // / 指标目录只读表（GET /metrics）
 import { useEffect, useState } from 'react'
 import {
@@ -138,7 +138,7 @@ function MetricRow({ name, metricInfos, onRemove }: {
   }
 
   return (
-    <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: '12px 16px 4px', marginBottom: 12, position: 'relative' }}>
+    <div style={{ border: '1px solid rgba(128,128,128,0.2)', borderRadius: 8, padding: '12px 16px 4px', marginBottom: 12, position: 'relative' }}>
       <Button
         type="text"
         danger

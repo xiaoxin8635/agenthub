@@ -1,15 +1,18 @@
-// 全局布局（06 文档第 3 节）：左侧固定导航 220px 可折叠 + 顶部面包屑 + 内容区最大 1440px
+// 全局布局（06 文档第 3 节）：左侧固定导航 220px 可折叠 + 顶部面包屑/搜索/主题切换 + 内容区最大 1440px
 import { useState } from 'react'
-import { Breadcrumb, Layout, Menu } from 'antd'
+import { Breadcrumb, Button, Layout, Menu, Tooltip } from 'antd'
 import {
   DashboardOutlined,
   DatabaseOutlined,
   ExperimentOutlined,
   FolderOpenOutlined,
+  MoonOutlined,
   SettingOutlined,
+  SunOutlined,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import GlobalSearch from '../components/GlobalSearch'
+import { useTheme } from '../theme'
 
 const { Sider, Header, Content } = Layout
 
@@ -40,6 +43,7 @@ const BREADCRUMB_LABELS: Record<string, string> = {
 export default function MainLayout() {
   const [collapsed, setCollapsed] = useState(false)
   const { pathname } = useLocation()
+  const { isDark, toggle } = useTheme()
   const parts = pathname.split('/').filter(Boolean)
   const breadcrumb = [
     { title: parts.length === 0 ? '仪表盘' : <Link to="/">首页</Link> },
@@ -57,7 +61,7 @@ export default function MainLayout() {
         collapsible
         collapsed={collapsed}
         onCollapse={setCollapsed}
-        style={{ borderRight: '1px solid #f0f0f0' }}
+        style={{ borderRight: '1px solid rgba(128,128,128,0.12)' }}
       >
         <div className="sider-logo">
           <span className="logo-badge">AH</span>
@@ -73,18 +77,30 @@ export default function MainLayout() {
           selectedKeys={[selectedKey]}
           defaultOpenKeys={['runs-menu']}
           items={MENU_ITEMS}
+          className="sider-menu"
           style={{ borderInlineEnd: 'none' }}
         />
+        <div className="sider-footer">{collapsed ? 'v1.0' : 'AgentHub v1.0'}</div>
       </Sider>
       <Layout>
         <Header className="top-header">
           <Breadcrumb items={breadcrumb} />
-          <div style={{ marginLeft: 'auto' }}>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
             <GlobalSearch />
+            <Tooltip title={isDark ? '切换为亮色模式' : '切换为暗色模式'}>
+              <Button
+                type="text"
+                size="small"
+                aria-label="切换主题"
+                icon={isDark ? <SunOutlined /> : <MoonOutlined />}
+                onClick={toggle}
+              />
+            </Tooltip>
           </div>
         </Header>
         <Content style={{ padding: 24 }}>
-          <div style={{ maxWidth: 1440, margin: '0 auto' }}>
+          {/* key=pathname：路由切换时重挂载以触发入场过渡动画 */}
+          <div key={pathname} className="page-fade" style={{ maxWidth: 1440, margin: '0 auto' }}>
             <Outlet />
           </div>
         </Content>

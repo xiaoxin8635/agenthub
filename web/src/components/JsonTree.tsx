@@ -1,4 +1,4 @@
-// 轻量 JSON 树：默认展开第一层，对象/数组可折叠，值按类型着色
+﻿// 轻量 JSON 树：默认展开第一层，对象/数组可折叠，值按类型着色
 import { useState } from 'react'
 import { CaretDownOutlined, CaretRightOutlined } from '@ant-design/icons'
 
@@ -39,7 +39,7 @@ function Branch({ name, value, depth }: { name?: string; value: object; depth: n
         )}
       </span>
       {open && (
-        <div style={{ paddingLeft: 16, marginLeft: 7, borderLeft: '1px solid #f0f0f0' }}>
+        <div style={{ paddingLeft: 16, marginLeft: 7, borderLeft: '1px solid rgba(128,128,128,0.25)' }}>
           {entries.map(([k, v]) =>
             v !== null && typeof v === 'object' ? (
               <Branch key={k} name={k} value={v as object} depth={depth + 1} />

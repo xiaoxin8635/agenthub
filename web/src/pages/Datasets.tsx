@@ -101,13 +101,15 @@ export default function Datasets() {
         </Card>
       )}
 
-      {/* UI-301 卡片网格 */}
+      {/* UI-301 卡片网格（逐卡渐入 + hover 上浮） */}
       {filtered.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
-          {filtered.map((d) => (
+          {filtered.map((d, i) => (
             <Card
               key={d.id}
               hoverable
+              className="lift-card stagger-item"
+              style={{ animationDelay: `${Math.min(i * 40, 320)}ms` }}
               onClick={() => navigate(`/datasets/${d.id}`)}
               title={<Typography.Text strong>{d.name}</Typography.Text>}
               extra={<SceneTag scene={d.scene} />}

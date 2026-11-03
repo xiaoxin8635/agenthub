@@ -1,4 +1,4 @@
-// 数据集详情（UI-303/305/306/307）：三 Tab —— 数据管理 / 版本与快照 / badcase 回灌
+﻿// 数据集详情（UI-303/305/306/307）：三 Tab —— 数据管理 / 版本与快照 / badcase 回灌
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Key } from 'react'
 import {
@@ -570,7 +570,7 @@ export default function DatasetDetail() {
         <Typography.Paragraph type="secondary">
           删除后不可恢复；已发布版本中的 item 不受影响（版本不可变）。
         </Typography.Paragraph>
-        <pre className="num" style={{ maxHeight: 200, overflow: 'auto', fontSize: 12, background: '#fafafa', padding: 8 }}>
+        <pre className="num" style={{ maxHeight: 200, overflow: 'auto', fontSize: 12, background: 'rgba(128,128,128,0.08)', padding: 8 }}>
           {JSON.stringify(delItem?.input, null, 2)}
         </pre>
       </Modal>
