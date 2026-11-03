@@ -210,8 +210,22 @@ def finalize(run_id: str, db: Session = Depends(get_db)):
 
 @router.get("/{run_id}")
 def get_run(run_id: str, db: Session = Depends(get_db)):
+    """Run 详情：内联数据集@版本 / Target / 指标组合引用，前端无需遍历解析（原 N×M 次请求 → 0）。"""
     run = _run_or_404(db, run_id)
-    return ok(RunOut.model_validate(run).model_dump(mode="json"))
+    data = RunOut.model_validate(run).model_dump(mode="json")
+    ver = db.get(DatasetVersion, run.dataset_version_id)
+    if ver is not None:
+        ds = db.get(Dataset, ver.dataset_id)
+        data["dataset"] = {"id": ds.id, "name": ds.name, "scene": ds.scene} if ds else None
+        data["dataset_version"] = ver.version
+    else:
+        data["dataset"] = None  # 版本/数据集已删
+        data["dataset_version"] = None
+    target = db.get(EvalTarget, run.target_id)
+    data["target_name"] = target.name if target else None
+    config = db.get(MetricConfig, run.metric_config_id)
+    data["metric_config_name"] = config.name if config else None
+    return ok(data)
 
 
 class FeedbackIn(BaseModel):

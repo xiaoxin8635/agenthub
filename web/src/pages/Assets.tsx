@@ -1,5 +1,6 @@
 // 数据资产页（UI-200）：列表筛选 / 导入向导 / 详情抽屉 / 批量加入数据集 / 删除确认
 import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Button,
@@ -62,6 +63,16 @@ export default function Assets() {
   const [detail, setDetail] = useState<Asset | null>(null)
   const [delTarget, setDelTarget] = useState<Asset | null>(null)
   const [delInput, setDelInput] = useState('')
+
+  // 全局搜索跳转：/assets?asset=<id> → 自动打开详情抽屉
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    const assetId = searchParams.get('asset')
+    if (!assetId) return
+    setSearchParams({}, { replace: true })
+    api.asset(assetId).then(setDetail).catch(() => {}) // 错误已统一 toast
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const load = useCallback(
     async (f: Filters) => {

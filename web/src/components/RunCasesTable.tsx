@@ -199,6 +199,9 @@ export default function RunCasesTable({
         loading={loading}
         dataSource={rows}
         columns={columns}
+        // 评测 case 可达数百上千条，虚拟滚动避免全量 DOM 渲染（UI-N2）
+        virtual
+        scroll={{ y: 560, x: 'max-content' }}
         expandable={{
           expandRowByClick: true,
           expandedRowRender: (r) => {

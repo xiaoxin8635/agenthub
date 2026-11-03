@@ -1,16 +1,18 @@
-import { useEffect } from 'react'
-import { App as AntApp } from 'antd'
+import { Suspense, lazy, useEffect } from 'react'
+import { App as AntApp, Spin } from 'antd'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { setNotifier } from './api/client'
 import MainLayout from './layouts/MainLayout'
-import Dashboard from './pages/Dashboard'
-import Assets from './pages/Assets'
-import Datasets from './pages/Datasets'
-import DatasetDetail from './pages/DatasetDetail'
-import Runs from './pages/Runs'
-import RunDetail from './pages/RunDetail'
-import MetricsPage from './pages/MetricsPage'
-import SettingsPage from './pages/SettingsPage'
+
+// 路由级代码分割：首屏只加载当前页面的 chunk，切换页面时按需拉取
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Assets = lazy(() => import('./pages/Assets'))
+const Datasets = lazy(() => import('./pages/Datasets'))
+const DatasetDetail = lazy(() => import('./pages/DatasetDetail'))
+const Runs = lazy(() => import('./pages/Runs'))
+const RunDetail = lazy(() => import('./pages/RunDetail'))
+const MetricsPage = lazy(() => import('./pages/MetricsPage'))
+const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 
 /** 将 antd message 注入请求层（client.ts 不依赖 React） */
 export function Bridge() {
@@ -21,18 +23,83 @@ export function Bridge() {
   return null
 }
 
+/** 懒加载页面的统一 fallback */
+function PageFallback() {
+  return (
+    <div style={{ textAlign: 'center', padding: 120 }}>
+      <Spin tip="页面加载中…" />
+    </div>
+  )
+}
+
 export default function App() {
   return (
     <Routes>
       <Route element={<MainLayout />}>
-        <Route index element={<Dashboard />} />
-        <Route path="assets" element={<Assets />} />
-        <Route path="datasets" element={<Datasets />} />
-        <Route path="datasets/:id" element={<DatasetDetail />} />
-        <Route path="runs" element={<Runs />} />
-        <Route path="runs/metrics" element={<MetricsPage />} />
-        <Route path="runs/:runId" element={<RunDetail />} />
-        <Route path="settings" element={<SettingsPage />} />
+        <Route
+          index
+          element={
+            <Suspense fallback={<PageFallback />}>
+              <Dashboard />
+            </Suspense>
+          }
+        />
+        <Route
+          path="assets"
+          element={
+            <Suspense fallback={<PageFallback />}>
+              <Assets />
+            </Suspense>
+          }
+        />
+        <Route
+          path="datasets"
+          element={
+            <Suspense fallback={<PageFallback />}>
+              <Datasets />
+            </Suspense>
+          }
+        />
+        <Route
+          path="datasets/:id"
+          element={
+            <Suspense fallback={<PageFallback />}>
+              <DatasetDetail />
+            </Suspense>
+          }
+        />
+        <Route
+          path="runs"
+          element={
+            <Suspense fallback={<PageFallback />}>
+              <Runs />
+            </Suspense>
+          }
+        />
+        <Route
+          path="runs/metrics"
+          element={
+            <Suspense fallback={<PageFallback />}>
+              <MetricsPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="runs/:runId"
+          element={
+            <Suspense fallback={<PageFallback />}>
+              <RunDetail />
+            </Suspense>
+          }
+        />
+        <Route
+          path="settings"
+          element={
+            <Suspense fallback={<PageFallback />}>
+              <SettingsPage />
+            </Suspense>
+          }
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

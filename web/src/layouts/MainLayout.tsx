@@ -9,6 +9,7 @@ import {
   SettingOutlined,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation } from 'react-router-dom'
+import GlobalSearch from '../components/GlobalSearch'
 
 const { Sider, Header, Content } = Layout
 
@@ -78,6 +79,9 @@ export default function MainLayout() {
       <Layout>
         <Header className="top-header">
           <Breadcrumb items={breadcrumb} />
+          <div style={{ marginLeft: 'auto' }}>
+            <GlobalSearch />
+          </div>
         </Header>
         <Content style={{ padding: 24 }}>
           <div style={{ maxWidth: 1440, margin: '0 auto' }}>

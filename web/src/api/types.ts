@@ -141,6 +141,11 @@ export interface RunDetail {
   summary: RunSummaryData
   error: string
   created_at: string
+  // 服务端内联引用（GET /runs/{id}），避免前端遍历解析；数据集/版本已删时为 null
+  dataset?: { id: string; name: string; scene: string } | null
+  dataset_version?: number | null
+  target_name?: string | null
+  metric_config_name?: string | null
 }
 
 /** compute_summary 聚合结构 */

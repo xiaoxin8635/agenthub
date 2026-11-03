@@ -1,19 +1,11 @@
-// Run 详情（UI-403/404/405）：概览（指标卡+环形通过率+指标分布条形图+失败分布）
+﻿// Run 详情（UI-403/404/405）：概览（指标卡+环形通过率+指标分布条形图+失败分布）
 // / 逐 case 结果 / 版本对比 三个 Tab；running 时 3s 轮询（页面不可见暂停）；回灌入口贯穿
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Card, Col, Progress, Row, Space, Spin, Statistic, Table, Tabs, Tag, Typography } from 'antd'
-import * as echarts from 'echarts'
+import echarts from '../utils/echarts'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
-import type {
-  DatasetBrief,
-  DatasetItem,
-  DatasetVersion,
-  EvalTarget,
-  MetricConfig,
-  RunDetail as RunDetailType,
-  RunSummaryData,
-} from '../api/types'
+import type { DatasetItem, RunDetail as RunDetailType, RunSummaryData } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
 import RunCasesTable from '../components/RunCasesTable'
 import RunCompareTab from '../components/RunCompareTab'
@@ -90,60 +82,47 @@ function MetricBarChart({ metrics }: { metrics: RunSummaryData['metrics'] }) {
 export default function RunDetail() {
   const { runId } = useParams<{ runId: string }>()
   const [run, setRun] = useState<RunDetailType | null>(null)
-  const [target, setTarget] = useState<EvalTarget | null>(null)
-  const [config, setConfig] = useState<MetricConfig | null>(null)
-  const [dataset, setDataset] = useState<DatasetBrief | null>(null)
-  const [version, setVersion] = useState<DatasetVersion | null>(null)
   const [items, setItems] = useState<DatasetItem[]>([])
   const [loading, setLoading] = useState(true)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
-  const resolvedRef = useRef(false)
-
-  // 数据集 / 版本 / 快照 items 解析：无「版本 id → 版本」端点，遍历数据集版本匹配（数据集数量少，可接受）
-  const resolveRefs = useCallback(async (r: RunDetailType) => {
-    if (resolvedRef.current) return
-    resolvedRef.current = true
-    try {
-      const [tgs, mcs, dss] = await Promise.all([api.targets(), api.metricConfigs(), api.datasets()])
-      setTarget(tgs.find((t) => t.id === r.target_id) ?? null)
-      setConfig(mcs.find((c) => c.id === r.metric_config_id) ?? null)
-      for (const ds of dss) {
-        const vs = await api.datasetVersions(ds.id)
-        const v = vs.items.find((x) => x.id === r.dataset_version_id)
-        if (v) {
-          setDataset(ds)
-          setVersion(v)
-          const its = await api.datasetItems(ds.id, { version: v.version, limit: 500 })
-          setItems(its.items)
-          break
-        }
-      }
-    } catch {
-      resolvedRef.current = false // 失败允许下次轮询重试
-    }
-  }, [])
 
   const load = useCallback(
     async (silent = false) => {
       if (!runId) return
       if (!silent) setLoading(true)
       try {
-        const r = await api.runDetail(runId)
-        setRun(r)
-        await resolveRefs(r)
+        setRun(await api.runDetail(runId))
       } catch {
         // 错误已统一 toast
       } finally {
         if (!silent) setLoading(false)
       }
     },
-    [runId, resolveRefs],
+    [runId],
   )
 
   useEffect(() => {
-    resolvedRef.current = false
     void load()
   }, [load])
+
+  // 快照 items：服务端已内联 dataset@version，仅需一次 items 拉取（版本不变不重拉）
+  const dsId = run?.dataset?.id
+  const verNo = run?.dataset_version
+  useEffect(() => {
+    if (!dsId || verNo == null) {
+      setItems([])
+      return
+    }
+    let cancelled = false
+    api.datasetItems(dsId, { version: verNo, limit: 500 })
+      .then((its) => {
+        if (!cancelled) setItems(its.items)
+      })
+      .catch(() => {}) // 错误已统一 toast
+    return () => {
+      cancelled = true
+    }
+  }, [dsId, verNo])
 
   // pending/running 时 3s 轮询，done/failed 即停；页面不可见暂停
   const active = run?.status === 'pending' || run?.status === 'running'
@@ -172,8 +151,8 @@ export default function RunDetail() {
 
   const s = run.summary && (run.summary as RunSummaryData).total != null ? (run.summary as RunSummaryData) : null
   const itemsMap = Object.fromEntries(items.map((i) => [i.id, i]))
-  const scene = config?.scene ?? dataset?.scene ?? ''
-  const metricTypes = config?.metrics.map((m) => m.type) ?? (s ? Object.keys(s.metrics) : [])
+  const scene = run.dataset?.scene ?? ''
+  const metricTypes = s ? Object.keys(s.metrics) : []
   const hasFailed = s != null && s.total > s.passed
 
   return (
@@ -190,17 +169,17 @@ export default function RunDetail() {
             </Space>
             <div style={{ marginTop: 8 }}>
               <Space size={8} wrap>
-                {dataset && version ? (
+                {run.dataset ? (
                   <Tag color="blue">
-                    <Link to={`/datasets/${dataset.id}`}>
-                      {dataset.name}@v{version.version}
+                    <Link to={`/datasets/${run.dataset.id}`}>
+                      {run.dataset.name}@v{run.dataset_version}
                     </Link>
                   </Tag>
                 ) : (
                   <Tag>(已删除数据集)</Tag>
                 )}
-                <Tag color="geekblue">Target：{target?.name ?? run.target_id}</Tag>
-                <Tag color="purple">指标组合：{config?.name ?? run.metric_config_id}</Tag>
+                <Tag color="geekblue">Target：{run.target_name ?? run.target_id}</Tag>
+                <Tag color="purple">指标组合：{run.metric_config_name ?? run.metric_config_id}</Tag>
                 {run.agent_version && <Tag>Agent：{run.agent_version}</Tag>}
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   发起于 <span className="num">{fmtTime(run.created_at)}</span>
@@ -358,7 +337,7 @@ export default function RunDetail() {
         open={feedbackOpen}
         onClose={() => setFeedbackOpen(false)}
         runId={run.id}
-        runLabel={`${target?.name ?? ''}${run.agent_version ? ` · ${run.agent_version}` : ''}`}
+        runLabel={`${run.target_name ?? ''}${run.agent_version ? ` · ${run.agent_version}` : ''}`}
         onDone={() => void load(true)}
       />
     </div>

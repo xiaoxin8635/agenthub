@@ -110,6 +110,9 @@ export default function DatasetItemsTable({
       loading={loading}
       dataSource={items}
       columns={columns}
+      // 大数据集（500+ 条）时避免全量 DOM 渲染（UI-N2）
+      virtual
+      scroll={{ y: 520, x: 'max-content' }}
       pagination={{ pageSize: 20, showSizeChanger: false, showTotal: (t) => `共 ${t} 条`, hideOnSinglePage: true }}
     />
   )

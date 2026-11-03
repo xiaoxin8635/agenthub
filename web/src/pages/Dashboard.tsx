@@ -1,7 +1,7 @@
-// 仪表盘（UI-100）：指标卡 4 张 + 通过率趋势 + 最近 Run + 待办条 + 空态引导
+﻿// 仪表盘（UI-100）：指标卡 4 张 + 通过率趋势 + 最近 Run + 待办条 + 空态引导
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Card, Col, Progress, Row, Space, Statistic, Table } from 'antd'
-import * as echarts from 'echarts'
+import echarts from '../utils/echarts'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { RunSummary, Stats } from '../api/types'
