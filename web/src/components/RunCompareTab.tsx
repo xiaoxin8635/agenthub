@@ -45,14 +45,19 @@ export default function RunCompareTab({ run }: { run: RunDetail }) {
 
   // 候选：同数据集版本、非自身（优先已完成的 Run 才有可比 summary）
   useEffect(() => {
+    let cancelled = false
     api
       .runs({ limit: 100 })
       .then((r) => {
-        setCandidates(
-          r.items.filter((x) => x.dataset_version_id === run.dataset_version_id && x.id !== run.id),
-        )
+        if (!cancelled)
+          setCandidates(
+            r.items.filter((x) => x.dataset_version_id === run.dataset_version_id && x.id !== run.id),
+          )
       })
       .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [run.id, run.dataset_version_id])
 
   useEffect(() => {
@@ -60,12 +65,20 @@ export default function RunCompareTab({ run }: { run: RunDetail }) {
       setCmp(null)
       return
     }
+    let cancelled = false
     setLoading(true)
     api
       .compareRuns(run.id, otherId)
-      .then(setCmp)
+      .then((r) => {
+        if (!cancelled) setCmp(r)
+      })
       .catch(() => {})
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [run.id, otherId])
 
   const diffRows: DiffRow[] = useMemo(() => {

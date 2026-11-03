@@ -157,6 +157,21 @@ class TestManagedRunner:
         run_data = client.get(f"/api/v1/runs/{run['id']}").json()["data"]
         assert run_data["status"] == "done"  # agent 失败不算 run 失败
 
+    def test_start_only_from_pending(self, client, eval_env):
+        """start 原子状态转移：仅 pending 可启动；重复/非 pending 状态一律 409（防重复执行结果翻倍）"""
+        env = eval_env
+        tg = client.post("/api/v1/targets", json={
+            "name": "t-start-guard", "kind": "http",
+            "endpoint_config": {"url": "http://127.0.0.1:9/invoke"},  # 不可达，仅触发状态流转
+        }).json()["data"]
+        run = client.post("/api/v1/runs", json={
+            "dataset_version_id": env["ver"]["id"], "target_id": tg["id"],
+            "metric_config_id": env["mc"]["id"],
+        }).json()["data"]
+        assert client.post(f"/api/v1/runs/{run['id']}/start").status_code == 200
+        # 第一次 start 已原子置 running（后台线程异步执行）；重复 start 必须 409
+        assert client.post(f"/api/v1/runs/{run['id']}/start").status_code == 409
+
 
 class TestEvalService:
     def test_evaluate_item_na_handling(self):

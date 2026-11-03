@@ -1,4 +1,5 @@
 """EvalRun：发起、托管执行、回传结果、查询与结果列表。"""
+import threading
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -149,54 +150,72 @@ def start_run(run_id: str, db: Session = Depends(get_db)):
     run = _run_or_404(db, run_id)
     if run.target.kind != "http":
         raise HTTPException(422, "仅 http 目标支持托管执行；external 目标请用 POST /runs/{id}/results 回传")
-    if run.status in {"running"}:
-        raise HTTPException(409, "run already running")
-    run.status = "pending"
+    # 原子状态转移（WHERE status='pending'）：并发双击/重复启动只有一个请求能成功，
+    # done/failed/running 一律拒绝，避免重复执行导致结果翻倍
+    updated = (
+        db.query(EvalRun)
+        .filter(EvalRun.id == run_id, EvalRun.status == "pending")
+        .update({"status": "running", "started_at": datetime.now()})
+    )
     db.commit()
-    start_run_async(run.id)
-    return ok({"started": run.id})
+    if updated == 0:
+        raise HTTPException(409, f"run 当前状态为 {run.status}，仅待执行（pending）可启动")
+    start_run_async(run_id)
+    return ok({"started": run_id})
+
+
+# 回传模式 per-run 进程锁：并发回传同一 run 时串行化「幂等检查 + 插入 + 收齐判断」，
+# 防止重复插入结果/提前 finalize（单进程部署下足够；多进程需改 DB 唯一约束）
+_report_locks: dict[str, threading.Lock] = {}
+_report_locks_guard = threading.Lock()
+
+
+def _run_lock(run_id: str) -> threading.Lock:
+    with _report_locks_guard:
+        return _report_locks.setdefault(run_id, threading.Lock())
 
 
 @router.post("/{run_id}/results")
 def report_results(run_id: str, body: ResultsIn, db: Session = Depends(get_db)):
     """回传模式：外部系统提交逐条输出，服务端统一算分；收齐后自动聚合。"""
     run = _run_or_404(db, run_id)
-    if run.status == "done":
-        raise HTTPException(409, "run already done")
-    if run.status == "pending":
-        run.status = "running"
-        run.started_at = datetime.now()
+    with _run_lock(run_id):
+        if run.status == "done":
+            raise HTTPException(409, "run already done")
+        if run.status == "pending":
+            run.status = "running"
+            run.started_at = datetime.now()
+            db.commit()
+
+        items = eval_service.load_snapshot_items(db, run.dataset_version)
+        by_id = {it.id: it for it in items}
+        mc = run.metric_config
+        known_ids = {r.item_id for r in db.query(EvalResult.item_id).filter(EvalResult.run_id == run.id).all()}
+
+        for res in body.results:
+            if res.item_id not in by_id:
+                raise HTTPException(422, f"item {res.item_id} 不属于该数据集版本")
+            if res.item_id in known_ids:
+                continue  # 幂等：已收到的 item 跳过
+            known_ids.add(res.item_id)
+            item_dict = {
+                "id": by_id[res.item_id].id,
+                "input": by_id[res.item_id].input,
+                "expected": by_id[res.item_id].expected,
+                "context": by_id[res.item_id].context,
+                "tags": by_id[res.item_id].tags,
+            }
+            scores, passed, metric_err = eval_service.evaluate_item(mc.metrics, item_dict, res.output)
+            db.add(EvalResult(
+                run_id=run.id, item_id=res.item_id, output=res.output,
+                trajectory=res.trajectory, scores=scores,
+                passed=None if res.error else passed, error=res.error or metric_err,
+            ))
         db.commit()
 
-    items = eval_service.load_snapshot_items(db, run.dataset_version)
-    by_id = {it.id: it for it in items}
-    mc = run.metric_config
-    known_ids = {r.item_id for r in db.query(EvalResult.item_id).filter(EvalResult.run_id == run.id).all()}
-
-    for res in body.results:
-        if res.item_id not in by_id:
-            raise HTTPException(422, f"item {res.item_id} 不属于该数据集版本")
-        if res.item_id in known_ids:
-            continue  # 幂等：已收到的 item 跳过
-        known_ids.add(res.item_id)
-        item_dict = {
-            "id": by_id[res.item_id].id,
-            "input": by_id[res.item_id].input,
-            "expected": by_id[res.item_id].expected,
-            "context": by_id[res.item_id].context,
-            "tags": by_id[res.item_id].tags,
-        }
-        scores, passed, metric_err = eval_service.evaluate_item(mc.metrics, item_dict, res.output)
-        db.add(EvalResult(
-            run_id=run.id, item_id=res.item_id, output=res.output,
-            trajectory=res.trajectory, scores=scores,
-            passed=None if res.error else passed, error=res.error or metric_err,
-        ))
-    db.commit()
-
-    received = db.query(EvalResult).filter(EvalResult.run_id == run.id).count()
-    if received >= len(items):
-        eval_service.finalize_run(db, run)
+        received = db.query(EvalResult).filter(EvalResult.run_id == run.id).count()
+        if received >= len(items):
+            eval_service.finalize_run(db, run)
     return ok({"received": received, "expected": len(items), "done": run.status == "done"})
 
 

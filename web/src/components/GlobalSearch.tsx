@@ -1,6 +1,6 @@
 // 顶部全局搜索（06 文档第 3 节站点地图）：资产内容关键词 / 数据集名称 / Run id 前缀，
 // 防抖 300ms，三类实体分组展示，选中直达详情。
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AutoComplete, Input, Tag } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -21,6 +21,14 @@ export default function GlobalSearch() {
   const [value, setValue] = useState('')
   const [groups, setGroups] = useState<Group[]>([])
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 卸载时清理挂起的防抖回调，避免组件销毁后 setState
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current)
+    },
+    [],
+  )
 
   const onSearch = (kw: string) => {
     setValue(kw)
