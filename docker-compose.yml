@@ -1,0 +1,28 @@
+services:
+  backend:
+    build: .
+    container_name: agenthub-backend
+    environment:
+      - AGENTHUB_DB=sqlite:////app/data/agenthub.db
+      - AGENTHUB_DATA_DIR=/app/data/snapshots
+      # 按需开启鉴权 / 并发 / Webhook，见 docs/07 第 4 章
+      # - AGENTHUB_API_KEY=change-me
+      # - AGENTHUB_RUN_CONCURRENCY=8
+      # - AGENTHUB_WEBHOOK_URL=https://your-hook.example.com
+    volumes:
+      - agenthub-data:/app/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: web.dockerfile
+    container_name: agenthub-frontend
+    ports:
+      - '8080:80'
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  agenthub-data:

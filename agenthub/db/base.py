@@ -41,9 +41,28 @@ def make_session_factory(engine) -> sessionmaker[Session]:
 engine = None
 SessionLocal: sessionmaker[Session] | None = None
 
+# 旧库补列清单：init 时逐个 ALTER TABLE（列已存在则忽略）
+_SQLITE_NEW_COLUMNS = [
+    ("eval_runs", "progress", "JSON"),
+]
+
+
+def _migrate_sqlite(db_path: str) -> None:
+    import sqlite3
+
+    con = sqlite3.connect(db_path)
+    try:
+        for table, col, col_type in _SQLITE_NEW_COLUMNS:
+            cols = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+            if cols and col not in cols:
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+        con.commit()
+    finally:
+        con.close()
+
 
 def init_db() -> None:
-    """按配置初始化全局 engine 并建表。"""
+    """按配置初始化全局 engine 并建表；旧库轻量补列（无 alembic，create_all 不改已有表）。"""
     global engine, SessionLocal
     url = get_settings().db
     if url.startswith("sqlite:///") and not url.endswith(":memory:"):
@@ -51,6 +70,7 @@ def init_db() -> None:
         from pathlib import Path
 
         Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
+        _migrate_sqlite(url.removeprefix("sqlite:///"))
     engine = make_engine(url)
     SessionLocal = make_session_factory(engine)
     from agenthub.db.models import Base

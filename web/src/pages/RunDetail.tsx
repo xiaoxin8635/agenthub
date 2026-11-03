@@ -209,7 +209,24 @@ export default function RunDetail() {
             type="info"
             showIcon
             icon={<Spin size="small" />}
-            message={run.status === 'pending' ? '评测排队中，页面每 3 秒自动刷新…' : '托管执行进行中，页面每 3 秒自动刷新…'}
+            message={
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <span>{run.status === 'pending' ? '评测排队中，页面每 3 秒自动刷新' : '托管执行进行中，页面每 3 秒自动刷新'}</span>
+                {run.progress && run.progress.total > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 220 }}>
+                    <Progress
+                      percent={Math.round((run.progress.done / run.progress.total) * 100)}
+                      size="small"
+                      status="active"
+                      style={{ flex: 1, marginBottom: 0 }}
+                    />
+                    <span className="num" style={{ fontSize: 12, color: '#8c8c8c', whiteSpace: 'nowrap' }}>
+                      {run.progress.done}/{run.progress.total} case
+                    </span>
+                  </div>
+                )}
+              </div>
+            }
           />
         )}
         {run.status === 'failed' && run.error && (

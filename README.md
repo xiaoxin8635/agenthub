@@ -1,5 +1,7 @@
 # AgentHub — 面向 Agent 评测的轻量数据中枢
 
+[![CI](https://github.com/xiaoxin8635/agenthub/actions/workflows/ci.yml/badge.svg)](https://github.com/xiaoxin8635/agenthub/actions/workflows/ci.yml)
+
 统一管理数据资产 → 标准化生产评测数据集 → 发起评测 → 失败 case 回灌形成闭环。**全流程可在浏览器中完成，无需命令行。**
 
 ```
@@ -55,7 +57,15 @@ python -m uvicorn agenthub.main:app --port 8300
 
 - API 根地址：`http://127.0.0.1:8300/api/v1`
 - 健康检查：`GET /api/v1/health`
-- 环境变量（见 [.env.example](.env.example)）：`AGENTHUB_DB`、`AGENTHUB_DATA_DIR`、`AGENTHUB_API_KEY`、`AGENTHUB_LLM_BASE_URL/KEY/MODEL`（仅 LLM Judge 需要）
+- 环境变量（见 [.env.example](.env.example)）：`AGENTHUB_DB`、`AGENTHUB_DATA_DIR`、`AGENTHUB_API_KEY`、`AGENTHUB_LLM_BASE_URL/KEY/MODEL`（仅 LLM Judge 需要）、`AGENTHUB_RUN_CONCURRENCY`（托管评测并发数）、`AGENTHUB_RUN_RETRY`（case 网络失败重试次数）、`AGENTHUB_WEBHOOK_URL`（评测完成事件推送）
+
+### Docker 一键部署
+
+```bash
+docker compose up -d --build
+# 打开 http://localhost:8080（nginx 托管前端并反代 /api）
+# 数据落在命名卷 agenthub-data（SQLite + 版本快照）
+```
 
 ### 2. Web 控制台（端口 5173）
 

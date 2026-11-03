@@ -191,6 +191,34 @@ export default function DatasetDetail() {
     }
   }
 
+  // 版本 diff（按快照 item id 对比：carried 的 item id 跨版本不变）
+  const [diffVer, setDiffVer] = useState<DatasetVersion | null>(null)
+  const [diffData, setDiffData] = useState<{
+    added: DatasetItem[]
+    removed: DatasetItem[]
+    kept: number
+  } | null>(null)
+
+  const openDiff = async (v: DatasetVersion) => {
+    setDiffVer(v)
+    setDiffData(null)
+    try {
+      const [a, b] = await Promise.all([
+        api.datasetItems(id, { version: v.version - 1, limit: 500 }),
+        api.datasetItems(id, { version: v.version, limit: 500 }),
+      ])
+      const aIds = new Set(a.items.map((i) => i.id))
+      const bIds = new Set(b.items.map((i) => i.id))
+      setDiffData({
+        added: b.items.filter((i) => !aIds.has(i.id)),
+        removed: a.items.filter((i) => !bIds.has(i.id)),
+        kept: b.items.filter((i) => aIds.has(i.id)).length,
+      })
+    } catch {
+      setDiffData({ added: [], removed: [], kept: 0 })
+    }
+  }
+
   const exportUrl = (version: number, format: string) =>
     `/api/v1/datasets/${ds?.name}/versions/${version}/export?format=${format}`
 
@@ -389,6 +417,11 @@ export default function DatasetDetail() {
                           <Button size="small" onClick={() => void openPreview(v)}>
                             预览快照
                           </Button>
+                          {v.version > 1 && (
+                            <Button size="small" onClick={() => void openDiff(v)}>
+                              与上一版对比
+                            </Button>
+                          )}
                           <Button size="small" href={exportUrl(v.version, 'jsonl')}>
                             导出 JSONL
                           </Button>
@@ -397,6 +430,9 @@ export default function DatasetDetail() {
                           </Button>
                           <Button size="small" href={exportUrl(v.version, 'hf')}>
                             导出 HF
+                          </Button>
+                          <Button size="small" href={exportUrl(v.version, 'csv')}>
+                            导出 CSV
                           </Button>
                           <Button size="small" icon={<CopyOutlined />} onClick={() => void copyPull(v.version)}>
                             复制拉取地址
@@ -591,6 +627,42 @@ export default function DatasetDetail() {
           <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
         ) : (
           <DatasetItemsTable scene={ds.scene} items={previewItems} />
+        )}
+      </Modal>
+
+      {/* 版本 diff 对比（vN vs vN-1） */}
+      <Modal
+        open={diffVer !== null}
+        width={860}
+        title={diffVer ? `v${diffVer.version - 1} → v${diffVer.version} 变更对比` : ''}
+        footer={null}
+        onCancel={() => setDiffVer(null)}
+      >
+        {diffData === null ? (
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        ) : (
+          <>
+            <Space size={24} style={{ marginBottom: 16 }}>
+              <Statistic title="新增" value={diffData.added.length} valueStyle={{ color: '#52c41a' }} />
+              <Statistic title="移除" value={diffData.removed.length} valueStyle={{ color: '#ff4d4f' }} />
+              <Statistic title="保留（carried）" value={diffData.kept} />
+            </Space>
+            {diffData.added.length > 0 && (
+              <>
+                <Typography.Title level={5} style={{ color: '#52c41a' }}>新增 items</Typography.Title>
+                <DatasetItemsTable scene={ds.scene} items={diffData.added} />
+              </>
+            )}
+            {diffData.removed.length > 0 && (
+              <>
+                <Typography.Title level={5} style={{ color: '#ff4d4f', marginTop: 16 }}>移除 items</Typography.Title>
+                <DatasetItemsTable scene={ds.scene} items={diffData.removed} />
+              </>
+            )}
+            {diffData.added.length === 0 && diffData.removed.length === 0 && (
+              <Alert type="info" message="两个版本内容完全一致（仅重新发布，无 item 变更）" />
+            )}
+          </>
         )}
       </Modal>
 

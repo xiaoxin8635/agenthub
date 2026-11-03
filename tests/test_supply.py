@@ -94,9 +94,22 @@ class TestExportFormats:
         assert doc["version"] == 2 and len(doc["splits"]["train"]) == 2
         assert doc["splits"]["train"][0]["expected"]["answer"]
 
+    def test_csv_format(self, client, published_ds):
+        """CSV 导出：utf-8-sig 带 BOM，Excel 可直开；复杂字段 JSON 字符串化"""
+        import csv
+        import io
+
+        name, i1, _ = published_ds
+        r = client.get(f"/api/v1/datasets/{name}/versions/2/export", params={"format": "csv"})
+        assert r.status_code == 200
+        assert r.content[:3] == b"\xef\xbb\xbf"  # BOM
+        rows = list(csv.DictReader(io.StringIO(r.content.decode("utf-8-sig"))))
+        assert len(rows) == 2 and rows[0]["id"]
+        assert json.loads(rows[0]["input"])["question"] == i1["input"]["question"]
+
     def test_invalid_format_422(self, client, published_ds):
         name, *_ = published_ds
-        assert client.get(f"/api/v1/datasets/{name}/versions/1/export", params={"format": "csv"}).status_code == 422
+        assert client.get(f"/api/v1/datasets/{name}/versions/1/export", params={"format": "xlsx"}).status_code == 422
 
 
 class TestSDK:

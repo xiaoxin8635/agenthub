@@ -59,6 +59,7 @@ def list_runs(
             "passed": s.get("passed"),
             "pass_rate": s.get("pass_rate"),
             "weighted_total": s.get("weighted_total"),
+            "progress": r.progress,
             "created_at": r.created_at.isoformat(),
             "finished_at": r.finished_at.isoformat() if r.finished_at else None,
         })
@@ -82,6 +83,7 @@ class RunOut(BaseModel):
     agent_version: str
     status: str
     summary: dict
+    progress: dict | None = None  # 执行中 {"done": n, "total": m}
     error: str
     created_at: datetime
 
@@ -216,6 +218,9 @@ def report_results(run_id: str, body: ResultsIn, db: Session = Depends(get_db)):
         received = db.query(EvalResult).filter(EvalResult.run_id == run.id).count()
         if received >= len(items):
             eval_service.finalize_run(db, run)
+            from agenthub.services.notify import notify_run_finished
+
+            notify_run_finished(run.id, "done", run.summary or {})
     return ok({"received": received, "expected": len(items), "done": run.status == "done"})
 
 

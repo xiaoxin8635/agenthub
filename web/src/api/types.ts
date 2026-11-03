@@ -35,6 +35,7 @@ export interface RunSummary {
   passed: number | null
   pass_rate: number | null
   weighted_total: number | null
+  progress?: { done: number; total: number } | null
   created_at: string
   finished_at: string | null
 }
@@ -139,6 +140,7 @@ export interface RunDetail {
   agent_version: string
   status: RunSummary['status']
   summary: RunSummaryData
+  progress?: { done: number; total: number } | null
   error: string
   created_at: string
   // 服务端内联引用（GET /runs/{id}），避免前端遍历解析；数据集/版本已删时为 null

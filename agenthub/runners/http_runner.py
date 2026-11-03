@@ -11,6 +11,7 @@ from agenthub.config import get_settings
 from agenthub.db.base import SessionLocal, make_engine, make_session_factory
 from agenthub.db.models import EvalResult, EvalRun
 from agenthub.services import eval_service
+from agenthub.services.notify import notify_run_finished
 
 
 class AgentCallError(Exception):
@@ -55,13 +56,17 @@ def call_agent(endpoint_config: dict, item: dict, timeout: float = 120.0) -> dic
 
 
 def _evaluate_one(metric_specs: list, item: dict, endpoint_config: dict, timeout: float) -> dict:
-    """单 case 处理（线程内执行，不触碰 Session）：调 Agent + 算分（含 LLM Judge 网络调用）。"""
+    """单 case 处理（线程内执行，不触碰 Session）：调 Agent（网络失败自动重试）+ 算分（含 LLM Judge）。"""
+    retries = max(0, get_settings().run_retry)
     error = ""
     output: dict = {}
-    try:
-        output = call_agent(endpoint_config, item, timeout=timeout)
-    except AgentCallError as e:
-        error = str(e)
+    for attempt in range(retries + 1):
+        try:
+            output = call_agent(endpoint_config, item, timeout=timeout)
+            error = ""
+            break
+        except AgentCallError as e:
+            error = str(e)
     scores, passed, metric_err = eval_service.evaluate_item(metric_specs, item, output)
     return {
         "item_id": item["id"],
@@ -103,13 +108,19 @@ def execute_run(run_id: str, session_factory: sessionmaker | None = None) -> Non
         timeout = float(endpoint_config.get("timeout", 120))
         metric_specs = mc.metrics
 
-        # 并发执行：executor.map 保序返回，Session 只在主线程操作
+        # 初始化进度（UI 轮询实时读取 run.progress）
+        run.progress = {"done": 0, "total": len(item_dicts)}
+        db.commit()
+
+        # 并发执行：executor.map 保序返回，Session 只在主线程操作；
+        # 每完成一条即 commit（WAL 读写并行，进度实时可见）
         workers = max(1, get_settings().run_concurrency)
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="eval") as pool:
             futures = [
                 pool.submit(_evaluate_one, metric_specs, item, endpoint_config, timeout)
                 for item in item_dicts
             ]
+            done_count = 0
             for fut in futures:
                 r = fut.result()
                 db.add(EvalResult(
@@ -117,18 +128,24 @@ def execute_run(run_id: str, session_factory: sessionmaker | None = None) -> Non
                     trajectory=r["trajectory"],
                     scores=r["scores"], passed=r["passed"], error=r["error"],
                 ))
+                done_count += 1
+                run.progress = {"done": done_count, "total": len(item_dicts)}
+                db.commit()
 
-        # 整个 Run 单事务提交：flush 使本事务内可查询，finalize 聚合后一次落库
-        db.flush()
+        # 收尾：全部结果已在事务中，finalize 聚合一次落库
         eval_service.finalize_run(db, run)
+        run.progress = None
         db.commit()
+        notify_run_finished(run.id, "done", run.summary or {})
     except Exception:  # noqa: BLE001 — Run 级失败落库，不抛出线程
         db.rollback()
         run = db.get(EvalRun, run_id)
         if run:
             run.status = "failed"
             run.error = traceback.format_exc()[-2000:]
+            run.progress = None
             db.commit()
+            notify_run_finished(run.id, "failed", {"error": run.error[-300:]})
     finally:
         db.close()
 

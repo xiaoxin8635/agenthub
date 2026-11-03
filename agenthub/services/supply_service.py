@@ -6,7 +6,7 @@ import yaml
 
 from agenthub.db.models import Dataset, DatasetVersion
 
-EXPORT_FORMATS = {"jsonl", "yaml", "hf"}
+EXPORT_FORMATS = {"jsonl", "yaml", "hf", "csv"}
 
 # expected 字段 → promptfoo assert type 的映射（仅单一标量字段可映射）
 _ASSERT_FIELD = {"answer": "equals", "outcome": "equals", "final_answer": "equals", "tool": "equals"}
@@ -88,6 +88,24 @@ def render_export(ds: Dataset, ver: DatasetVersion, items: list[dict], format: s
     if format == "hf":
         content = json.dumps(_hf_doc(ver, items), ensure_ascii=False, indent=2)
         return content.encode("utf-8"), "application/json", f"{ds.name}-v{ver.version}.hf.json"
+    if format == "csv":
+        import csv
+        import io
+
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["id", "input", "expected", "context", "tags", "source_asset_id"])
+        for it in items:
+            w.writerow([
+                it["id"],
+                _to_scalar(it.get("input")),
+                _to_scalar(it.get("expected")),
+                _to_scalar(it.get("context")),
+                ";".join(it.get("tags") or []),
+                it.get("source_asset_id") or "",
+            ])
+        # utf-8-sig 带 BOM：Excel 直接打开中文不乱码
+        return buf.getvalue().encode("utf-8-sig"), "text/csv", f"{ds.name}-v{ver.version}.csv"
     raise ValueError(f"unsupported format: {format}")
 
 

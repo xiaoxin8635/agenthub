@@ -102,6 +102,7 @@ class EvalRun(Base):
     agent_version: Mapped[str] = mapped_column(String(100), default="")
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)  # pending/running/done/failed
     summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    progress: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {"done": n, "total": m}，执行中实时更新
     error: Mapped[str] = mapped_column(Text, default="")
     started_at: Mapped[str | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[str | None] = mapped_column(DateTime, nullable=True)

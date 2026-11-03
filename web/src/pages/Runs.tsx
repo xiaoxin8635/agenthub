@@ -1,6 +1,6 @@
 // 评测 Run 列表（UI-401）：状态/数据集/Target 筛选 + 通过率色条 + running 行 3s 轮询（页面不可见暂停）
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, Card, Empty, Select, Space, Table } from 'antd'
+import { Button, Card, Empty, Progress, Select, Space, Table } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlayCircleOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -17,6 +17,19 @@ const STATUS_OPTIONS = [
   { value: 'done', label: '已完成' },
   { value: 'failed', label: '失败' },
 ]
+
+/** 执行中行内进度条（后端 run.progress 每 case 实时更新） */
+function RunProgress({ progress, status }: { progress: NonNullable<RunSummary['progress']>; status: string }) {
+  const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <Progress percent={pct} size="small" style={{ flex: 1, marginBottom: 0 }} status={status === 'pending' ? 'normal' : 'active'} />
+      <span className="num" style={{ fontSize: 12, color: '#8c8c8c', whiteSpace: 'nowrap' }}>
+        {progress.done}/{progress.total}
+      </span>
+    </div>
+  )
+}
 
 export default function Runs() {
   const [runs, setRuns] = useState<RunSummary[]>([])
@@ -92,7 +105,17 @@ export default function Runs() {
     { title: 'Target', dataIndex: 'target', width: 150, render: (v: string | null) => v ?? '—' },
     { title: '指标组合', dataIndex: 'metric_config', width: 170, render: (v: string | null) => v ?? '—' },
     { title: 'Agent 版本', dataIndex: 'agent_version', width: 110, render: (v: string | null) => v || '—' },
-    { title: '通过率', dataIndex: 'pass_rate', width: 180, render: (v: number | null) => <PassRate value={v} /> },
+    {
+      title: '通过率 / 进度',
+      dataIndex: 'pass_rate',
+      width: 180,
+      render: (v: number | null, row) =>
+        (row.status === 'running' || row.status === 'pending') && row.progress ? (
+          <RunProgress progress={row.progress} status={row.status} />
+        ) : (
+          <PassRate value={v} />
+        ),
+    },
     {
       title: '加权总分',
       dataIndex: 'weighted_total',
