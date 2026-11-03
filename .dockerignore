@@ -1,0 +1,16 @@
+# 构建上下文排除：体积与敏感文件
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+data
+*.db
+*.db-wal
+*.db-shm
+.screenshots
+.env
+__pycache__
+**/__pycache__
+.pytest_cache
+.trae
