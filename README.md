@@ -83,17 +83,22 @@ curl -F file=@data.jsonl -F source=trace_import -F tags=smoke \
   http://127.0.0.1:8300/api/v1/assets/import
 ```
 
+> 详细使用文档（控制台全流程 / External 回传协议 / CLI / SDK / FAQ）见 [docs/07-启动与使用指南](docs/07-启动与使用指南.md)。
+
 ## SDK 用法
 
 ```python
 from agenthub_sdk import AgentHub
-hub = AgentHub(base_url="http://localhost:8300", api_key="...")
-ds = hub.pull("order-agent-regression@3")     # 拉标准数据集
-run = hub.run_eval(dataset="order-agent-regression@3",
-                   endpoint="http://localhost:9000/invoke",
-                   metric_config="agent-e2e")
-print(run.summary)                             # 指标分数
+
+hub = AgentHub(base_url="http://localhost:8300", api_key="")
+ds = hub.pull("order-agent-regression@3")   # 拉取不可变快照（本地缓存）
+
+for item in ds:                              # Item(id, input, expected, context, ...)
+    output = my_agent(item.input)
+    compare(output, item.expected)
 ```
+
+> SDK 定位为数据集拉取客户端；发起评测 / 回灌请用控制台、CLI（`python -m agenthub.cli eval ...`）或 REST API。
 
 ## API 概览
 
@@ -116,7 +121,7 @@ print(run.summary)                             # 指标分数
 ```
 agenthub/            # 后端包：routers / services / metrics / runners / db / schemas
 web/                 # React 控制台（Vite + antd 5 + echarts）
-sdk/agenthub_sdk/    # Python SDK
+sdk/agenthub_sdk/    # Python SDK（数据集拉取，带本地缓存）
 docs/                # 设计文档 + 截图
 tests/               # pytest 用例
 data/                # SQLite 与版本快照（运行时生成，不入库）
@@ -133,6 +138,7 @@ data/                # SQLite 与版本快照（运行时生成，不入库）
 | [04-评测指标体系](docs/04-评测指标体系.md) | 规则/LLM Judge/RAG/轨迹四类指标、聚合与对比 |
 | [05-参考项目调研](docs/05-参考项目调研.md) | Langfuse/promptfoo/DeepEval/RAGAS 等借鉴与差异定位 |
 | [06-前端UI需求文档](docs/06-前端UI需求文档.md) | AgentHub Console：站点地图、页面需求 UI-1xx~5xx、视觉规范 |
+| [07-启动与使用指南](docs/07-启动与使用指南.md) | 安装启动、配置参考、控制台全流程、External 回传协议、CLI/SDK/API 速查、FAQ |
 
 ## 项目状态
 
