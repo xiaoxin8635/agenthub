@@ -20,11 +20,48 @@ import {
   Typography,
   message,
 } from 'antd'
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
+import { DeleteOutlined, InfoCircleOutlined, PlusOutlined, QuestionCircleOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import type { EvalTarget, MetricConfig, MetricInfo, MetricSpec } from '../api/types'
 import { SceneTag, SCENE_META } from '../components/labels'
 import { fmtTime } from '../utils/format'
+
+// ---------- 指标中文名与通俗说明（下拉选择引导） ----------
+
+const METRIC_ZH: Record<string, { zh: string; tip: string }> = {
+  'rule:exact': { zh: '精确匹配', tip: '回答与标准答案完全一致（忽略首尾空格和大小写），适合有唯一标准答案的题' },
+  'rule:contains': { zh: '包含关键词', tip: '回答中必须包含指定关键词，适合检查"必须提到的信息"（如数字、名词）' },
+  'rule:not_contains': { zh: '不包含', tip: '回答中不得出现指定词，适合检查违禁词、内部信息泄漏' },
+  'rule:regex': { zh: '正则匹配', tip: '用正则表达式校验回答格式，如订单号、日期、编号' },
+  'rule:json_schema': { zh: 'JSON 结构校验', tip: '回答（JSON）必须符合指定 Schema，适合结构化输出验收' },
+  'rule:one_of': { zh: '枚举命中', tip: '回答必须是候选列表之一，适合分类、单选题' },
+  'rule:numeric_within': { zh: '数值容差', tip: '从回答提取数字与期望值比较并允许误差，适合价格、百分比' },
+  'rule:custom': { zh: '自定义规则', tip: '组合多种检测：关键词组 / 长度区间 / 正则 / 数值容差 / 结构校验' },
+  'judge:correctness': { zh: '正确性评审（LLM）', tip: 'LLM 对照标准答案给 0~1 分并说明理由，适合开放性问答' },
+  'judge:faithfulness': { zh: '忠实度评审（LLM）', tip: '检查回答是否忠于参考资料、有没有编造，RAG 防幻觉必备' },
+  'judge:custom': { zh: '自定义评审（LLM）', tip: 'LLM 按你写的评分细则打分，如简洁度、语气、是否夹带推广' },
+}
+
+// 下拉选项：中文名 + 类型名 + 一句话说明（两行渲染，支持中文搜索）
+function metricOption(m: MetricInfo) {
+  const zh = METRIC_ZH[m.type]?.zh ?? m.type
+  const tip = METRIC_ZH[m.type]?.tip ?? m.description
+  return {
+    value: m.type,
+    search: `${m.type} ${zh}`,
+    zh,
+    label: (
+      <div style={{ lineHeight: 1.4, padding: '2px 0' }}>
+        <div>
+          <b>{zh}</b>
+          <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>{m.type}</Typography.Text>
+          {m.builtin === false && <Tag color="orange" style={{ marginLeft: 8, fontSize: 11 }}>自定义</Tag>}
+        </div>
+        <div style={{ fontSize: 12, color: '#8c8c8c' }}>{tip}</div>
+      </div>
+    ),
+  }
+}
 
 // ---------- 指标参数描述（与 agenthub/metrics 各实现的 spec 约定对齐） ----------
 
@@ -195,20 +232,58 @@ function MetricRow({ name, metricInfos, onRemove }: {
         <Form.Item name={[name, 'type']} label="指标类型" rules={[{ required: true, message: '请选择指标' }]} style={{ marginBottom: 8 }}>
           <Select
             showSearch
-            placeholder="选择指标"
+            placeholder="选择指标（输入可搜索中文名）"
+            virtual={false}
+            optionLabelProp="zh"
+            filterOption={(input, option) =>
+              String((option as { search?: string })?.search ?? '').toLowerCase().includes(input.toLowerCase())
+            }
             options={[
-              { label: '规则类（rule）', options: metricInfos.filter((m) => m.kind === 'rule').map((m) => ({ value: m.type, label: m.type })) },
-              { label: 'LLM 裁判（judge）', options: metricInfos.filter((m) => m.kind === 'judge').map((m) => ({ value: m.type, label: m.type })) },
+              {
+                label: '规则类（代码判定，免费稳定）',
+                options: metricInfos
+                  .filter((m) => m.kind === 'rule')
+                  .map((m) => metricOption(m)),
+              },
+              {
+                label: 'LLM 裁判（智能评审，消耗 Token）',
+                options: metricInfos
+                  .filter((m) => m.kind === 'judge')
+                  .map((m) => metricOption(m)),
+              },
             ].filter((g) => g.options.length > 0)}
           />
         </Form.Item>
-        <Form.Item name={[name, 'weight']} label="权重" initialValue={1} style={{ marginBottom: 8 }}>
+        <Form.Item
+          name={[name, 'weight']}
+          label={
+            <Tooltip title="该指标在此条评分中的占比，最终得分 = Σ(指标得分 × 权重) ÷ Σ(权重)">
+              权重 <QuestionCircleOutlined style={{ color: '#8c8c8c' }} />
+            </Tooltip>
+          }
+          initialValue={1}
+          style={{ marginBottom: 8 }}
+        >
           <InputNumber min={0} step={0.5} style={{ width: '100%' }} />
         </Form.Item>
-        <Form.Item name={[name, 'threshold']} label="阈值" style={{ marginBottom: 8 }}>
+        <Form.Item
+          name={[name, 'threshold']}
+          label={
+            <Tooltip title="该指标的及格线：得分低于阈值时，整条 case 判失败（红）">
+              阈值 <QuestionCircleOutlined style={{ color: '#8c8c8c' }} />
+            </Tooltip>
+          }
+          style={{ marginBottom: 8 }}
+        >
           <InputNumber min={0} max={1} step={0.05} placeholder={kind === 'judge' ? '默认 0.7' : '默认 1'} style={{ width: '100%' }} />
         </Form.Item>
       </div>
+      {type && METRIC_ZH[type] && (
+        <div style={{ marginBottom: 8, fontSize: 12, color: '#8c8c8c', background: 'rgba(22,119,255,0.06)', borderRadius: 6, padding: '6px 10px' }}>
+          <InfoCircleOutlined style={{ marginRight: 6, color: '#1677ff' }} />
+          {METRIC_ZH[type].tip}
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0 12px' }}>
         {renderField(ACTUAL_FIELD, [name])}
         {extra.map((f) => renderField(f, [name]))}
