@@ -4,7 +4,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 ASSET_TYPES = {"dialog", "trace", "tool_log", "doc", "custom"}
-ASSET_SOURCES = {"manual", "trace_import", "badcase_feedback"}
+ASSET_SOURCES = {"manual", "trace_import", "badcase_feedback", "ai_generated"}
 
 
 class AssetCreate(BaseModel):

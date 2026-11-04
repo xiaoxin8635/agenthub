@@ -257,3 +257,15 @@ export interface ServerSettings {
   cors_origins: string
   run_concurrency?: number
 }
+
+export interface GenerateJob {
+  id: string
+  filename: string
+  status: 'running' | 'done' | 'error'
+  done: number
+  total: number
+  generated: number
+  inserted?: number
+  stats?: { generated: number; kept: number; dropped_exact: number; dropped_fuzzy: number }
+  error?: string
+}

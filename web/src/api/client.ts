@@ -12,6 +12,7 @@ import type {
   EvalTarget,
   FeedbackResult,
   FromAssetsResult,
+  GenerateJob,
   ImportResult,
   MetricConfig,
   MetricInfo,
@@ -116,6 +117,13 @@ export const api = {
     fd.append('tags', tags.join(','))
     return request<ImportResult>('/assets/import', { method: 'POST', body: fd })
   },
+  generateEvalset: (file: File, perChunk: number) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('per_chunk', String(perChunk))
+    return request<{ job_id: string }>('/assets/generate', { method: 'POST', body: fd })
+  },
+  generateJob: (id: string) => request<GenerateJob>(`/assets/generate/${id}`),
 
   // Run（列表与下拉）
   runs: (params: {

@@ -1,9 +1,11 @@
 import json
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from agenthub.db.base import get_db
+from agenthub.config import get_settings
+from agenthub.db.base import SessionLocal, get_db
 from agenthub.db.models import Asset
 from agenthub.schemas.asset import (
     ASSET_SOURCES,
@@ -19,6 +21,34 @@ from agenthub.schemas.common import ok
 from agenthub.services import asset_service
 
 router = APIRouter(prefix="/api/v1/assets", tags=["assets"])
+
+
+# ---------- AI 生成评测集 ----------
+
+
+@router.post("/generate")
+async def generate_evalset(file: UploadFile, per_chunk: int = Form(1)):
+    """上传文档（md/txt），后台 LLM 出题生成 rag 评测资产（内置代码去重）。"""
+    raw = (await file.read()).decode("utf-8", errors="replace")
+    if len(raw.strip()) < 50:
+        raise HTTPException(422, "文档内容太短（至少 50 字）")
+    s = get_settings()
+    if not (s.llm_base_url and s.llm_model):
+        raise HTTPException(409, "LLM 未配置：需要 AGENTHUB_LLM_BASE_URL / AGENTHUB_LLM_MODEL")
+    from agenthub.services import generator
+
+    job_id = generator.start_job(file.filename or "doc.md", raw, max(1, min(per_chunk, 5)))
+    return ok({"job_id": job_id})
+
+
+@router.get("/generate/{job_id}")
+def generate_job_status(job_id: str):
+    from agenthub.services import generator
+
+    job = generator.JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, "job not found（服务重启后任务状态失效，但已生成的资产仍保留）")
+    return ok(job)
 
 
 def _get_asset_or_404(db: Session, asset_id: str) -> Asset:
@@ -104,3 +134,20 @@ def delete_asset(asset_id: str, db: Session = Depends(get_db)):
     db.delete(asset)
     db.commit()
     return ok({"deleted": asset_id})
+
+
+class BatchDeleteIn(BaseModel):
+    ids: list[str]
+
+
+@router.post("/batch-delete")
+def batch_delete_assets(body: BatchDeleteIn, db: Session = Depends(get_db)):
+    """批量删除资产（已转入数据集的 item 保留但失去来源关联）。"""
+    deleted: list[str] = []
+    for aid in dict.fromkeys(body.ids):  # 去重保序
+        asset = db.get(Asset, aid)
+        if asset is not None:
+            db.delete(asset)
+            deleted.append(aid)
+    db.commit()
+    return ok({"deleted": deleted})

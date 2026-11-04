@@ -10,6 +10,7 @@ import {
   Empty,
   Input,
   Modal,
+  Popconfirm,
   Select,
   Space,
   Table,
@@ -17,13 +18,14 @@ import {
   Typography,
   message,
 } from 'antd'
-import { DeleteOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
+import { DeleteOutlined, ReloadOutlined, RobotOutlined, UploadOutlined } from '@ant-design/icons'
 import type { Asset } from '../api/types'
 import { api } from '../api/client'
 import { fmtTime } from '../utils/format'
 import { SourceTag, TypeTag } from '../components/labels'
 import JsonTree from '../components/JsonTree'
 import ImportAssetsModal from '../components/ImportAssetsModal'
+import GenerateEvalsetModal from '../components/GenerateEvalsetModal'
 import BatchAddToDatasetModal from '../components/BatchAddToDatasetModal'
 
 const TYPE_OPTIONS = [
@@ -38,6 +40,7 @@ const SOURCE_OPTIONS = [
   { value: 'manual', label: '手工创建' },
   { value: 'trace_import', label: 'Trace 导入' },
   { value: 'badcase_feedback', label: 'Badcase 回灌' },
+  { value: 'ai_generated', label: 'AI 生成' },
 ]
 
 const PAGE_SIZE = 20
@@ -59,6 +62,7 @@ export default function Assets() {
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([])
 
   const [importOpen, setImportOpen] = useState(false)
+  const [genOpen, setGenOpen] = useState(false)
   const [batchOpen, setBatchOpen] = useState(false)
   const [detail, setDetail] = useState<Asset | null>(null)
   const [delTarget, setDelTarget] = useState<Asset | null>(null)
@@ -140,6 +144,18 @@ export default function Assets() {
     }
   }
 
+  const doBatchDelete = async () => {
+    if (selectedKeys.length === 0) return
+    try {
+      const r = await api.deleteAssetsBatch(selectedKeys.map(String))
+      message.success(`已删除 ${r.deleted.length} 条资产`)
+      setSelectedKeys([])
+      void load(filters)
+    } catch {
+      // 错误已 toast
+    }
+  }
+
   return (
     <div>
       {/* UI-201 筛选器置顶 */}
@@ -176,6 +192,9 @@ export default function Assets() {
         />
         <Button icon={<ReloadOutlined />} onClick={() => void load(filters)} />
         <div style={{ flex: 1 }} />
+        <Button icon={<RobotOutlined style={{ color: '#722ed1' }} />} onClick={() => setGenOpen(true)}>
+          AI 生成评测集
+        </Button>
         <Button type="primary" icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
           导入 JSONL
         </Button>
@@ -193,6 +212,18 @@ export default function Assets() {
               <Button type="primary" size="small" onClick={() => setBatchOpen(true)}>
                 加入数据集…
               </Button>
+              <Popconfirm
+                title={`确认删除选中的 ${selectedKeys.length} 条资产？`}
+                description="删除不可恢复；已转入数据集的条目会保留但失去来源关联。"
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                onConfirm={() => void doBatchDelete()}
+              >
+                <Button danger size="small" icon={<DeleteOutlined />}>
+                  删除选中
+                </Button>
+              </Popconfirm>
               <Button size="small" onClick={() => setSelectedKeys([])}>
                 清除
               </Button>
@@ -306,6 +337,11 @@ export default function Assets() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         onImported={() => void load(filters)}
+      />
+      <GenerateEvalsetModal
+        open={genOpen}
+        onClose={() => setGenOpen(false)}
+        onDone={() => void load(filters)}
       />
 
       {/* UI-204 批量加入数据集 */}
