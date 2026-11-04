@@ -42,6 +42,12 @@ class MetricConfigCreate(BaseModel):
     metrics: list[MetricSpecIn]
 
 
+class MetricConfigUpdate(BaseModel):
+    """部分更新（scene 不可改——与数据集场景绑定）。"""
+    name: str | None = None
+    metrics: list[MetricSpecIn] | None = None
+
+
 class MetricConfigOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -123,6 +129,25 @@ def create_metric_config(body: MetricConfigCreate, db: Session = Depends(get_db)
 def list_metric_configs(db: Session = Depends(get_db)):
     rows = db.query(MetricConfig).order_by(MetricConfig.created_at.desc()).all()
     return ok([MetricConfigOut.model_validate(m).model_dump(mode="json") for m in rows])
+
+
+@router.put("/metric-configs/{config_id}")
+def update_metric_config(config_id: str, body: MetricConfigUpdate, db: Session = Depends(get_db)):
+    mc = db.get(MetricConfig, config_id)
+    if mc is None:
+        raise HTTPException(404, "metric config not found")
+    if body.name is not None and body.name != mc.name:
+        dup = db.query(MetricConfig).filter(MetricConfig.name == body.name).first()
+        if dup:
+            raise HTTPException(409, f"指标组合名称「{body.name}」已存在")
+        mc.name = body.name
+    if body.metrics is not None:
+        if not body.metrics:
+            raise HTTPException(422, "指标列表不能为空")
+        mc.metrics = [m.model_dump(exclude_none=True) for m in body.metrics]
+    db.commit()
+    db.refresh(mc)
+    return ok(MetricConfigOut.model_validate(mc).model_dump(mode="json"))
 
 
 @router.delete("/metric-configs/{config_id}")

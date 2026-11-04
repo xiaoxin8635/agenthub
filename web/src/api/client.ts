@@ -107,6 +107,8 @@ export const api = {
     request<{ deleted: string }>(`/targets/${id}`, { method: 'DELETE' }),
   deleteMetricConfig: (id: string) =>
     request<{ deleted: string }>(`/metric-configs/${id}`, { method: 'DELETE' }),
+  updateMetricConfig: (id: string, body: { name?: string; metrics?: MetricSpec[] }) =>
+    request<MetricConfig>(`/metric-configs/${id}`, jsonInit('PUT', body)),
   importAssets: (file: File, source: string, tags: string[]) => {
     const fd = new FormData()
     fd.append('file', file)

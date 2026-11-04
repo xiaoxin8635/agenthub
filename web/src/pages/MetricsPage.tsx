@@ -20,7 +20,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { DeleteOutlined, InfoCircleOutlined, PlusOutlined, QuestionCircleOutlined } from '@ant-design/icons'
+import { DeleteOutlined, EditOutlined, InfoCircleOutlined, PlusOutlined, QuestionCircleOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import type { EvalTarget, MetricConfig, MetricInfo, MetricSpec } from '../api/types'
 import { SceneTag, SCENE_META } from '../components/labels'
@@ -183,6 +183,18 @@ function rowToSpec(row: Record<string, unknown>): MetricSpec {
   return spec
 }
 
+/** 编辑回显：MetricSpec → 表单行（keywords/choices 数组转逗号文本、schema 转 JSON 文本） */
+function specToRow(s: MetricSpec): Record<string, unknown> {
+  const row: Record<string, unknown> = { type: s.type, weight: s.weight ?? 1, threshold: s.threshold }
+  for (const [k, v] of Object.entries(s)) {
+    if (['type', 'weight', 'threshold'].includes(k)) continue
+    if (k === 'choices' || k === 'keywords') row[k] = (v as string[]).join(', ')
+    else if (k === 'schema') row[k] = JSON.stringify(v, null, 2)
+    else row[k] = v
+  }
+  return row
+}
+
 // ---------- 指标动态行 ----------
 
 function MetricRow({ name, metricInfos, onRemove }: {
@@ -302,6 +314,7 @@ export default function MetricsPage() {
   const [metricInfos, setMetricInfos] = useState<MetricInfo[]>([])
   const [targetOpen, setTargetOpen] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
+  const [editingConfig, setEditingConfig] = useState<MetricConfig | null>(null)
   const [targetForm] = Form.useForm()
   const [configForm] = Form.useForm()
   const [submitting, setSubmitting] = useState(false)
@@ -357,6 +370,16 @@ export default function MetricsPage() {
     }
   }
 
+  const openEditConfig = (c: MetricConfig) => {
+    setEditingConfig(c)
+    configForm.setFieldsValue({
+      name: c.name,
+      scene: c.scene,
+      metrics: (c.metrics as MetricSpec[]).map(specToRow),
+    })
+    setConfigOpen(true)
+  }
+
   const submitConfig = async () => {
     const v = await configForm.validateFields()
     if (!v.metrics || v.metrics.length === 0) {
@@ -366,13 +389,16 @@ export default function MetricsPage() {
     setConfigMetricsError('')
     setSubmitting(true)
     try {
-      await api.createMetricConfig({
-        name: v.name,
-        scene: v.scene,
-        metrics: (v.metrics as Record<string, unknown>[]).map(rowToSpec),
-      })
+      const metrics = (v.metrics as Record<string, unknown>[]).map(rowToSpec)
+      if (editingConfig) {
+        await api.updateMetricConfig(editingConfig.id, { name: v.name, metrics })
+        message.success('指标组合已更新（历史 Run 结果不受影响，之后发起的评测用新配置）')
+      } else {
+        await api.createMetricConfig({ name: v.name, scene: v.scene, metrics })
+      }
       setConfigOpen(false)
       configForm.resetFields()
+      setEditingConfig(null)
       reload()
     } catch (e) {
       if (e instanceof SyntaxError) {
@@ -486,7 +512,10 @@ export default function MetricsPage() {
             type="primary"
             size="small"
             icon={<PlusOutlined />}
-            onClick={() => setConfigOpen(true)}
+            onClick={() => {
+              setEditingConfig(null)
+              setConfigOpen(true)
+            }}
             disabled={metricInfos.length === 0}
           >
             新建指标组合
@@ -528,18 +557,23 @@ export default function MetricsPage() {
               title: '操作',
               width: 80,
               render: (_, c) => (
-                <Popconfirm
-                  title={`删除指标组合「${c.name}」？`}
-                  description="已被评测任务引用时无法删除。"
-                  okText="删除"
-                  okButtonProps={{ danger: true }}
-                  cancelText="取消"
-                  onConfirm={() => void doDeleteConfig(c)}
-                >
-                  <Button danger type="text" size="small" icon={<DeleteOutlined />}>
-                    删除
+                <Space size={0}>
+                  <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditConfig(c)}>
+                    编辑
                   </Button>
-                </Popconfirm>
+                  <Popconfirm
+                    title={`删除指标组合「${c.name}」？`}
+                    description="已被评测任务引用时无法删除。"
+                    okText="删除"
+                    okButtonProps={{ danger: true }}
+                    cancelText="取消"
+                    onConfirm={() => void doDeleteConfig(c)}
+                  >
+                    <Button danger type="text" size="small" icon={<DeleteOutlined />}>
+                      删除
+                    </Button>
+                  </Popconfirm>
+                </Space>
               ),
             },
           ]}
@@ -549,7 +583,7 @@ export default function MetricsPage() {
                 '指标目录加载中，稍候即可创建'
               ) : (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有指标组合" style={{ padding: '24px 0' }}>
-                  <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setConfigOpen(true)}>
+                  <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { setEditingConfig(null); setConfigOpen(true) }}>
                     新建指标组合
                   </Button>
                 </Empty>
@@ -626,29 +660,39 @@ export default function MetricsPage() {
         </Form>
       </Modal>
 
-      {/* 新建指标组合 */}
+      {/* 新建 / 编辑指标组合 */}
       <Modal
-        title="新建指标组合"
         open={configOpen}
         onCancel={() => {
           setConfigOpen(false)
+          setEditingConfig(null)
           setConfigMetricsError('')
           configForm.resetFields()
         }}
         onOk={submitConfig}
         confirmLoading={submitting}
-        okText="创建"
+        okText={editingConfig ? '保存' : '创建'}
+        title={editingConfig ? `编辑指标组合 · ${editingConfig.name}` : '新建指标组合'}
         width={720}
-        destroyOnClose
+        forceRender
       >
         <Form form={configForm} layout="vertical">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 200px', gap: 12 }}>
             <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
               <Input placeholder="如：QA-综合评测" />
             </Form.Item>
-            <Form.Item name="scene" label="适用场景" rules={[{ required: true, message: '请选择场景' }]}>
+            <Form.Item
+              name="scene"
+              label={
+                <Tooltip title={editingConfig ? '场景与数据集绑定，不可修改' : ''}>
+                  适用场景
+                </Tooltip>
+              }
+              rules={[{ required: true, message: '请选择场景' }]}
+            >
               <Select
                 placeholder="选择场景"
+                disabled={!!editingConfig}
                 options={Object.entries(SCENE_META).map(([k, m]) => ({ value: k, label: m.label }))}
               />
             </Form.Item>

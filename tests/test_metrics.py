@@ -150,6 +150,28 @@ class TestDeleteEndpoints:
         assert client.delete(f"/api/v1/metric-configs/{cid}").status_code == 200
         assert client.delete(f"/api/v1/metric-configs/{cid}").status_code == 404
 
+    def test_metric_config_update(self, client):
+        r = client.post(
+            "/api/v1/metric-configs",
+            json={"name": "upd-me", "scene": "qa", "metrics": [{"type": "rule:exact", "weight": 1}]},
+        )
+        cid = r.json()["data"]["id"]
+        # 改名 + 换指标列表
+        r2 = client.put(
+            f"/api/v1/metric-configs/{cid}",
+            json={"name": "upd-me-2", "metrics": [{"type": "rule:contains", "weight": 1, "value": "x"}]},
+        )
+        assert r2.status_code == 200
+        data = r2.json()["data"]
+        assert data["name"] == "upd-me-2" and data["metrics"][0]["type"] == "rule:contains"
+        # 重名 409
+        client.post("/api/v1/metric-configs", json={"name": "other", "scene": "qa", "metrics": [{"type": "rule:exact"}]})
+        assert client.put(f"/api/v1/metric-configs/{cid}", json={"name": "other"}).status_code == 409
+        # 空 metrics 422
+        assert client.put(f"/api/v1/metric-configs/{cid}", json={"metrics": []}).status_code == 422
+        # 不存在 404
+        assert client.put("/api/v1/metric-configs/nope", json={"name": "x"}).status_code == 404
+
     def test_metrics_catalog_has_custom(self, client):
         rows = client.get("/api/v1/metrics").json()["data"]
         by_type = {r["type"]: r for r in rows}
