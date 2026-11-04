@@ -101,6 +101,12 @@ export const api = {
     request<Asset>(`/assets/${id}`, jsonInit('PATCH', body)),
   deleteAsset: (id: string) =>
     request<{ deleted: string }>(`/assets/${id}`, { method: 'DELETE' }),
+  deleteAssetsBatch: (ids: string[]) =>
+    request<{ deleted: string[] }>('/assets/batch-delete', jsonInit('POST', { ids })),
+  deleteTarget: (id: string) =>
+    request<{ deleted: string }>(`/targets/${id}`, { method: 'DELETE' }),
+  deleteMetricConfig: (id: string) =>
+    request<{ deleted: string }>(`/metric-configs/${id}`, { method: 'DELETE' }),
   importAssets: (file: File, source: string, tags: string[]) => {
     const fd = new FormData()
     fd.append('file', file)
@@ -135,6 +141,15 @@ export const api = {
     request<FeedbackResult>(`/runs/${runId}/feedback`, jsonInit('POST', body)),
   compareRuns: (runId: string, otherRunId: string) =>
     request<CompareResult>(`/runs/${runId}/compare/${otherRunId}`),
+  deleteRun: (runId: string) =>
+    request<{ deleted: string[]; results_removed: number; skipped_running: string[] }>(`/runs/${runId}`, { method: 'DELETE' }),
+  cancelRun: (runId: string) =>
+    request<{ canceled: string }>(`/runs/${runId}/cancel`, { method: 'POST' }),
+  deleteRunsBatch: (ids: string[]) =>
+    request<{ deleted: string[]; results_removed: number; skipped_running: string[] }>(
+      '/runs/batch-delete',
+      jsonInit('POST', { ids }),
+    ),
 
   // 指标与目标管理（UI-407）
   metrics: () => request<MetricInfo[]>('/metrics'),

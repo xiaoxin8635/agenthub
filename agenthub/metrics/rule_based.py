@@ -139,3 +139,58 @@ class NumericWithinMetric:
         tol_rel = float(spec.get("rel_tolerance", 0.0))
         ok = abs(a - e) <= tol_abs + tol_rel * abs(e)
         return _score(spec, 1.0 if ok else 0.0)
+
+
+@register
+class CustomMetric:
+    """rule:custom —— 自定义规则入口：按 kind 分派（regex/numeric_within/json_schema 复用内置实现）。
+
+    spec 参数：
+        kind        contains_any / length_range / regex / numeric_within / json_schema
+        keywords    contains_any: 关键词列表；match=any(任一命中)/all(全部命中)
+        match       contains_any 的命中模式，默认 any
+        min_len / max_len   length_range: 文本长度区间（min_len 默认 0，max_len 默认无穷）
+        其余 kind 的参数与对应内置指标一致（pattern / expected+tolerances / schema）
+    """
+
+    name = "rule:custom"
+    _DELEGATE = {"regex": RegexMetric, "numeric_within": NumericWithinMetric, "json_schema": JsonSchemaMetric}
+
+    def evaluate(self, item, output, spec):
+        kind = spec.get("kind")
+        if kind == "contains_any":
+            return self._contains_any(item, output, spec)
+        if kind == "length_range":
+            return self._length_range(item, output, spec)
+        delegate = self._DELEGATE.get(kind)
+        if delegate is None:
+            raise MetricError(f"rule:custom 不支持的 kind={kind!r}（可选 contains_any/length_range/regex/numeric_within/json_schema）")
+        return delegate().evaluate(item, output, spec)
+
+    def _contains_any(self, item, output, spec):
+        actual = _resolve_actual(output, spec)
+        keywords = spec.get("keywords")
+        if not isinstance(keywords, (list, tuple)) or not keywords:
+            raise MetricError("contains_any 需要 keywords 列表")
+        a = str(actual or "")
+        if spec.get("case_insensitive", True):
+            a = a.lower()
+            keywords = [str(k).lower() for k in keywords]
+        else:
+            keywords = [str(k) for k in keywords]
+        hits = [k for k in keywords if k in a]
+        want_all = spec.get("match", "any") == "all"
+        ok = len(hits) == len(keywords) if want_all else bool(hits)
+        score = MetricScore(score=1.0 if ok else 0.0, passed=ok)
+        score.detail = f"命中 {len(hits)}/{len(keywords)}: {hits or '无'}"
+        return score
+
+    def _length_range(self, item, output, spec):
+        actual = _resolve_actual(output, spec)
+        n = len(str(actual or ""))
+        lo = int(spec.get("min_len", 0))
+        hi = spec.get("max_len")
+        ok = n >= lo and (hi is None or n <= int(hi))
+        score = MetricScore(score=1.0 if ok else 0.0, passed=ok)
+        score.detail = f"长度 {n}，要求 [{lo}, {hi if hi is not None else '∞'}]"
+        return score

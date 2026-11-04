@@ -14,6 +14,36 @@ def ev(name, item, output, **spec):
 
 
 class TestRules:
+    def test_custom_contains_any(self):
+        # 任一命中
+        assert ev("rule:custom", ITEM_QA, {"answer": "请到工单中心处理"},
+                  kind="contains_any", keywords=["退款", "工单"]).passed is True
+        # 全部命中模式：只命中一个 → 失败
+        r = ev("rule:custom", ITEM_QA, {"answer": "请到工单中心处理"},
+               kind="contains_any", keywords=["退款", "工单"], match="all")
+        assert r.passed is False and "1/2" in r.detail
+        # 全部命中：都出现 → 通过
+        assert ev("rule:custom", ITEM_QA, {"answer": "退款请开工单"},
+                  kind="contains_any", keywords=["退款", "工单"], match="all").passed is True
+
+    def test_custom_length_range(self):
+        assert ev("rule:custom", ITEM_QA, {"answer": "北京"},
+                  kind="length_range", min_len=2, max_len=10).passed is True
+        r = ev("rule:custom", ITEM_QA, {"answer": "北京的出租司机"},
+               kind="length_range", min_len=2, max_len=4)
+        assert r.passed is False  # 长度 6 超上限
+
+    def test_custom_delegates_builtin(self):
+        # regex / numeric_within / json_schema 转发到内置实现
+        assert ev("rule:custom", ITEM_QA, {"answer": "单号A123"},
+                  kind="regex", pattern=r"A\d+").passed is True
+        assert ev("rule:custom", ITEM_QA, {"answer": "99.2"},
+                  kind="numeric_within", value=99, abs_tolerance=0.5).passed is True
+
+    def test_custom_invalid_kind(self):
+        with pytest.raises(MetricError, match="不支持的 kind"):
+            ev("rule:custom", ITEM_QA, {"answer": "x"}, kind="nope")
+
     def test_exact(self):
         assert ev("rule:exact", ITEM_QA, {"answer": "北京"}).passed is True
         assert ev("rule:exact", ITEM_QA, {"answer": "上海"}).passed is False
@@ -95,3 +125,34 @@ class TestJudge:
         ms = ev("judge:correctness", ITEM_QA, {"answer": "x"}, threshold=0.5, value=None) if False else \
             get_metric("judge:correctness").evaluate(ITEM_QA, {"answer": "回答里没有答案"}, {"type": "judge:correctness", "threshold": 0.0})
         assert ms.passed is True  # 0.0 >= 0.0
+
+
+class TestDeleteEndpoints:
+    """Target / 指标组合删除端点（被 Run 引用由端点内 count 守卫，基础流程在此覆盖）。"""
+
+    def test_target_delete_flow(self, client):
+        r = client.post(
+            "/api/v1/targets",
+            json={"name": "del-me", "kind": "http", "endpoint_config": {"url": "http://x/invoke"}},
+        )
+        assert r.status_code == 200
+        tid = r.json()["data"]["id"]
+        assert client.delete(f"/api/v1/targets/{tid}").status_code == 200
+        assert client.delete(f"/api/v1/targets/{tid}").status_code == 404
+
+    def test_metric_config_delete_flow(self, client):
+        r = client.post(
+            "/api/v1/metric-configs",
+            json={"name": "del-me-config", "scene": "qa", "metrics": [{"type": "rule:exact", "weight": 1}]},
+        )
+        assert r.status_code == 200
+        cid = r.json()["data"]["id"]
+        assert client.delete(f"/api/v1/metric-configs/{cid}").status_code == 200
+        assert client.delete(f"/api/v1/metric-configs/{cid}").status_code == 404
+
+    def test_metrics_catalog_has_custom(self, client):
+        rows = client.get("/api/v1/metrics").json()["data"]
+        by_type = {r["type"]: r for r in rows}
+        assert "rule:custom" in by_type
+        assert by_type["rule:custom"]["builtin"] is False
+        assert by_type["rule:exact"]["builtin"] is True

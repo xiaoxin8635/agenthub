@@ -25,7 +25,7 @@ export interface ImportResult {
 
 export interface RunSummary {
   id: string
-  status: 'pending' | 'running' | 'done' | 'failed'
+  status: 'pending' | 'running' | 'done' | 'failed' | 'canceled'
   dataset: string | null
   dataset_version_id: string
   target: string | null
@@ -211,6 +211,7 @@ export interface MetricInfo {
   type: string
   kind: string
   description: string
+  builtin?: boolean
 }
 
 /** 被测目标（EvalTarget） */

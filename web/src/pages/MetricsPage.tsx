@@ -9,6 +9,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Popconfirm,
   Radio,
   Select,
   Space,
@@ -17,6 +18,7 @@ import {
   Tag,
   Tooltip,
   Typography,
+  message,
 } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
@@ -29,10 +31,13 @@ import { fmtTime } from '../utils/format'
 interface Field {
   key: string
   label: string
-  widget: 'text' | 'textarea' | 'number' | 'switch'
+  widget: 'text' | 'textarea' | 'number' | 'switch' | 'select'
   placeholder?: string
   required?: boolean
   help?: string
+  options?: { value: string; label: string }[]
+  /** 仅当 rule:custom 的 kind 为这些值时才显示（undefined = 恒显示） */
+  kinds?: string[]
 }
 
 const ACTUAL_FIELD: Field = {
@@ -85,9 +90,42 @@ const TYPE_FIELDS: Record<string, Field[]> = {
     { key: 'context_path', label: '参考资料路径', widget: 'text', placeholder: '默认 context.passages' },
   ],
   'judge:custom': [{ key: 'rubric', label: '评分细则 rubric', widget: 'textarea', required: true }],
+  'rule:custom': [
+    {
+      key: 'kind',
+      label: '规则 kind',
+      widget: 'select',
+      required: true,
+      options: [
+        { value: 'contains_any', label: 'contains_any 关键词组' },
+        { value: 'length_range', label: 'length_range 长度区间' },
+        { value: 'regex', label: 'regex 正则' },
+        { value: 'numeric_within', label: 'numeric_within 数值容差' },
+        { value: 'json_schema', label: 'json_schema 结构校验' },
+      ],
+    },
+    { key: 'keywords', label: '关键词列表 keywords', widget: 'text', placeholder: '逗号分隔，如：退款, 工单, 发票', kinds: ['contains_any'] },
+    {
+      key: 'match',
+      label: '命中模式 match',
+      widget: 'select',
+      options: [
+        { value: 'any', label: 'any 任一命中' },
+        { value: 'all', label: 'all 全部命中' },
+      ],
+      kinds: ['contains_any'],
+    },
+    { key: 'min_len', label: '最小长度', widget: 'number', kinds: ['length_range'] },
+    { key: 'max_len', label: '最大长度', widget: 'number', placeholder: '留空不限制', kinds: ['length_range'] },
+    { key: 'pattern', label: '正则 pattern', widget: 'text', kinds: ['regex'] },
+    { key: 'value', label: '期望数值 value', widget: 'text', kinds: ['numeric_within'] },
+    { key: 'abs_tolerance', label: '绝对容差', widget: 'number', kinds: ['numeric_within'] },
+    { key: 'rel_tolerance', label: '相对容差', widget: 'number', kinds: ['numeric_within'] },
+    { key: 'schema', label: 'JSON Schema', widget: 'textarea', help: 'JSON 对象文本', kinds: ['json_schema'] },
+  ],
 }
 
-/** 提交前把表单行转换为 MetricSpec（类型转换：choices 拆分、schema 解析、数值化） */
+/** 提交前把表单行转换为 MetricSpec（类型转换：choices/keywords 拆分、schema 解析、数值化） */
 function rowToSpec(row: Record<string, unknown>): MetricSpec {
   const type = String(row.type)
   const spec: MetricSpec = { type }
@@ -96,9 +134,10 @@ function rowToSpec(row: Record<string, unknown>): MetricSpec {
   for (const f of TYPE_FIELDS[type] ?? []) {
     const v = row[f.key]
     if (v === undefined || v === null || v === '') continue
-    if (f.key === 'choices') spec.choices = String(v).split(/[,，]/).map((s) => s.trim()).filter(Boolean)
+    if (f.key === 'choices' || f.key === 'keywords')
+      spec[f.key] = String(v).split(/[,，]/).map((s) => s.trim()).filter(Boolean)
     else if (f.key === 'schema') spec.schema = JSON.parse(String(v))
-    else if (f.key === 'abs_tolerance' || f.key === 'rel_tolerance') spec[f.key] = Number(v)
+    else if (['abs_tolerance', 'rel_tolerance', 'min_len', 'max_len'].includes(f.key)) spec[f.key] = Number(v)
     else if (f.key === 'value') {
       const n = Number(v)
       spec.value = Number.isFinite(n) && String(v).trim() !== '' && /^-?\d+(\.\d+)?$/.test(String(v).trim()) ? n : v
@@ -117,7 +156,10 @@ function MetricRow({ name, metricInfos, onRemove }: {
   const form = Form.useFormInstance()
   const type = Form.useWatch(['metrics', name, 'type'], form) as string | undefined
   const kind = type?.split(':')[0]
-  const extra = TYPE_FIELDS[type ?? ''] ?? []
+  const customKind = Form.useWatch(['metrics', name, 'kind'], form) as string | undefined
+  const allFields = TYPE_FIELDS[type ?? ''] ?? []
+  // rule:custom 按所选 kind 过滤参数字段（kinds 未标注的字段恒显示）
+  const extra = allFields.filter((f) => !f.kinds || !customKind || f.kinds.includes(customKind))
 
   const renderField = (f: Field, prefix: (string | number)[] = []) => {
     const path = [...prefix, f.key]
@@ -130,6 +172,8 @@ function MetricRow({ name, metricInfos, onRemove }: {
           <InputNumber style={{ width: '100%' }} placeholder={f.placeholder} />
         ) : f.widget === 'switch' ? (
           <Switch />
+        ) : f.widget === 'select' ? (
+          <Select options={f.options} placeholder={f.placeholder} />
         ) : (
           <Input placeholder={f.placeholder} />
         )}
@@ -196,6 +240,26 @@ export default function MetricsPage() {
   }, [])
 
   const descOf = (type: string) => metricInfos.find((m) => m.type === type)?.description ?? ''
+
+  const doDeleteTarget = async (t: EvalTarget) => {
+    try {
+      await api.deleteTarget(t.id)
+      message.success(`Target「${t.name}」已删除`)
+      reload()
+    } catch {
+      // 错误已统一 toast（409 会提示先删除相关 Run）
+    }
+  }
+
+  const doDeleteConfig = async (c: MetricConfig) => {
+    try {
+      await api.deleteMetricConfig(c.id)
+      message.success(`指标组合「${c.name}」已删除`)
+      reload()
+    } catch {
+      // 错误已统一 toast
+    }
+  }
 
   const submitTarget = async () => {
     const v = await targetForm.validateFields()
@@ -301,6 +365,24 @@ export default function MetricsPage() {
               width: 150,
               render: (v: string) => <span className="num">{fmtTime(v)}</span>,
             },
+            {
+              title: '操作',
+              width: 80,
+              render: (_, t) => (
+                <Popconfirm
+                  title={`删除 Target「${t.name}」？`}
+                  description="已被评测任务引用时无法删除。"
+                  okText="删除"
+                  okButtonProps={{ danger: true }}
+                  cancelText="取消"
+                  onConfirm={() => void doDeleteTarget(t)}
+                >
+                  <Button danger type="text" size="small" icon={<DeleteOutlined />}>
+                    删除
+                  </Button>
+                </Popconfirm>
+              ),
+            },
           ]}
           locale={{
             emptyText: (
@@ -365,6 +447,24 @@ export default function MetricsPage() {
               width: 150,
               render: (v: string) => <span className="num">{fmtTime(v)}</span>,
             },
+            {
+              title: '操作',
+              width: 80,
+              render: (_, c) => (
+                <Popconfirm
+                  title={`删除指标组合「${c.name}」？`}
+                  description="已被评测任务引用时无法删除。"
+                  okText="删除"
+                  okButtonProps={{ danger: true }}
+                  cancelText="取消"
+                  onConfirm={() => void doDeleteConfig(c)}
+                >
+                  <Button danger type="text" size="small" icon={<DeleteOutlined />}>
+                    删除
+                  </Button>
+                </Popconfirm>
+              ),
+            },
           ]}
           locale={{
             emptyText:
@@ -381,8 +481,8 @@ export default function MetricsPage() {
         />
       </Card>
 
-      {/* 指标目录（只读） */}
-      <Card title="指标目录（内置只读）" size="small">
+      {/* 指标目录（内置 + 自定义规则入口） */}
+      <Card title="指标目录" size="small">
         <Table<MetricInfo>
           rowKey="type"
           size="small"
@@ -393,7 +493,12 @@ export default function MetricsPage() {
               title: '类型',
               dataIndex: 'type',
               width: 200,
-              render: (t: string) => <Tag color={t.startsWith('rule') ? 'cyan' : 'purple'}>{t}</Tag>,
+              render: (t: string, m) => (
+                <Space size={4}>
+                  <Tag color={t.startsWith('rule') ? 'cyan' : 'purple'}>{t}</Tag>
+                  {m.builtin === false && <Tag color="orange">自定义</Tag>}
+                </Space>
+              ),
             },
             { title: '类别', dataIndex: 'kind', width: 100 },
             { title: '说明', dataIndex: 'description' },

@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from agenthub.db.base import get_db
-from agenthub.db.models import EvalTarget, MetricConfig
+from agenthub.db.models import EvalRun, EvalTarget, MetricConfig
 from agenthub.metrics import all_metrics, get_metric
 from agenthub.schemas.common import ok
 
@@ -58,7 +58,12 @@ def list_metrics():
     rows = []
     for name, m in sorted(all_metrics().items()):
         doc = (getattr(m, "__doc__", "") or "").strip().splitlines()
-        rows.append({"type": name, "kind": name.split(":")[0], "description": doc[0] if doc else ""})
+        rows.append({
+            "type": name,
+            "kind": name.split(":")[0],
+            "description": doc[0] if doc else "",
+            "builtin": name != "rule:custom",  # rule:custom 为用户自定义规则入口
+        })
     return ok(rows)
 
 
@@ -83,6 +88,19 @@ def list_targets(db: Session = Depends(get_db)):
     return ok([TargetOut.model_validate(t).model_dump(mode="json") for t in rows])
 
 
+@router.delete("/targets/{target_id}")
+def delete_target(target_id: str, db: Session = Depends(get_db)):
+    t = db.get(EvalTarget, target_id)
+    if t is None:
+        raise HTTPException(404, "target not found")
+    refs = db.query(EvalRun).filter(EvalRun.target_id == target_id).count()
+    if refs:
+        raise HTTPException(409, f"该 Target 已被 {refs} 个评测任务引用，请先删除相关 Run（评测历史需可追溯）")
+    db.delete(t)
+    db.commit()
+    return ok({"deleted": target_id})
+
+
 @router.post("/metric-configs")
 def create_metric_config(body: MetricConfigCreate, db: Session = Depends(get_db)):
     if db.query(MetricConfig).filter(MetricConfig.name == body.name).first():
@@ -105,3 +123,16 @@ def create_metric_config(body: MetricConfigCreate, db: Session = Depends(get_db)
 def list_metric_configs(db: Session = Depends(get_db)):
     rows = db.query(MetricConfig).order_by(MetricConfig.created_at.desc()).all()
     return ok([MetricConfigOut.model_validate(m).model_dump(mode="json") for m in rows])
+
+
+@router.delete("/metric-configs/{config_id}")
+def delete_metric_config(config_id: str, db: Session = Depends(get_db)):
+    mc = db.get(MetricConfig, config_id)
+    if mc is None:
+        raise HTTPException(404, "metric config not found")
+    refs = db.query(EvalRun).filter(EvalRun.metric_config_id == config_id).count()
+    if refs:
+        raise HTTPException(409, f"该指标组合已被 {refs} 个评测任务引用，请先删除相关 Run（评测历史需可追溯）")
+    db.delete(mc)
+    db.commit()
+    return ok({"deleted": config_id})
