@@ -57,7 +57,7 @@ function metricOption(m: MetricInfo) {
           <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>{m.type}</Typography.Text>
           {m.builtin === false && <Tag color="orange" style={{ marginLeft: 8, fontSize: 11 }}>自定义</Tag>}
         </div>
-        <div style={{ fontSize: 12, color: '#8c8c8c' }}>{tip}</div>
+        <div style={{ fontSize: 12, color: '#8c8c8c', whiteSpace: 'normal', wordBreak: 'break-all' }}>{tip}</div>
       </div>
     ),
   }
@@ -234,6 +234,8 @@ function MetricRow({ name, metricInfos, onRemove }: {
             showSearch
             placeholder="选择指标（输入可搜索中文名）"
             virtual={false}
+            popupMatchSelectWidth={false}
+            dropdownStyle={{ minWidth: 460, maxWidth: 600 }}
             optionLabelProp="zh"
             filterOption={(input, option) =>
               String((option as { search?: string })?.search ?? '').toLowerCase().includes(input.toLowerCase())
