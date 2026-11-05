@@ -184,6 +184,8 @@ def report_results(run_id: str, body: ResultsIn, db: Session = Depends(get_db)):
     with _run_lock(run_id):
         if run.status == "done":
             raise HTTPException(409, "run already done")
+        if run.status == "canceled":
+            raise HTTPException(409, "run 已取消，不再接收回传")
         if run.status == "pending":
             run.status = "running"
             run.started_at = datetime.now()
@@ -224,10 +226,31 @@ def report_results(run_id: str, body: ResultsIn, db: Session = Depends(get_db)):
     return ok({"received": received, "expected": len(items), "done": run.status == "done"})
 
 
+@router.post("/{run_id}/cancel")
+def cancel_run(run_id: str, db: Session = Depends(get_db)):
+    """取消评测（pending/running → canceled 终态）。
+
+    典型场景：external 回传模式的 Run 外部系统不再回传、或托管执行想中途放弃。
+    原子状态转移防并发；已收到的结果保留可供排查，但不再聚合、不再接收新回传。
+    """
+    updated = (
+        db.query(EvalRun)
+        .filter(EvalRun.id == run_id, EvalRun.status.in_(["pending", "running"]))
+        .update({"status": "canceled", "finished_at": datetime.now()})
+    )
+    db.commit()
+    if updated == 0:
+        run = _run_or_404(db, run_id)
+        raise HTTPException(409, f"run 当前状态为 {run.status}，仅待执行/运行中可取消")
+    return ok({"canceled": run_id})
+
+
 @router.post("/{run_id}/finalize")
 def finalize(run_id: str, db: Session = Depends(get_db)):
     """强制聚合（未收齐时也按现有结果出 summary）。"""
     run = _run_or_404(db, run_id)
+    if run.status == "canceled":
+        raise HTTPException(409, "run 已取消，不能聚合")
     eval_service.finalize_run(db, run)
     return ok(RunOut.model_validate(run).model_dump(mode="json"))
 
@@ -290,3 +313,44 @@ def list_results(run_id: str, passed: bool | None = None, offset: int = 0, limit
         "total": total,
         "items": [ResultOut.model_validate(r).model_dump(mode="json") for r in rows],
     })
+
+
+def _delete_run_cascade(db: Session, run: EvalRun) -> int:
+    """删除 Run 及其全部结果，返回删除的结果条数。"""
+    n = db.query(EvalResult).filter(EvalResult.run_id == run.id).delete()
+    db.delete(run)
+    return n
+
+
+@router.delete("/{run_id}")
+def delete_run(run_id: str, db: Session = Depends(get_db)):
+    """删除单个 Run 及其结果（running 状态拒绝：后台线程仍在写库）。"""
+    run = _run_or_404(db, run_id)
+    if run.status == "running":
+        raise HTTPException(409, "Run 正在执行，无法删除；请等待完成或失败后再删")
+    n = _delete_run_cascade(db, run)
+    db.commit()
+    return ok({"deleted": [run_id], "results_removed": n, "skipped_running": []})
+
+
+class BatchDeleteIn(BaseModel):
+    ids: list[str]
+
+
+@router.post("/batch-delete")
+def batch_delete_runs(body: BatchDeleteIn, db: Session = Depends(get_db)):
+    """批量删除 Run：running 状态逐条跳过（不整批失败）。"""
+    deleted: list[str] = []
+    skipped: list[str] = []
+    removed = 0
+    for rid in dict.fromkeys(body.ids):  # 去重保序
+        run = db.get(EvalRun, rid)
+        if run is None:
+            continue
+        if run.status == "running":
+            skipped.append(rid)
+            continue
+        removed += _delete_run_cascade(db, run)
+        deleted.append(rid)
+    db.commit()
+    return ok({"deleted": deleted, "results_removed": removed, "skipped_running": skipped})

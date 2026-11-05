@@ -173,6 +173,99 @@ class TestManagedRunner:
         assert client.post(f"/api/v1/runs/{run['id']}/start").status_code == 409
 
 
+class TestRunDelete:
+    """Run 删除（单个/批量）：级联删结果、running 拒删/跳过。"""
+
+    @staticmethod
+    def _mk_run(client, env, ver_id=None):
+        return client.post("/api/v1/runs", json={
+            "dataset_version_id": ver_id or env["ver"]["id"],
+            "target_id": env["target"]["id"],
+            "metric_config_id": env["mc"]["id"],
+        }).json()["data"]
+
+    @staticmethod
+    def _finish(client, env, run_id):
+        item_ids = [r["id"] for r in client.get(
+            f"/api/v1/datasets/{env['ds']['id']}/items", params={"version": 1}).json()["data"]["items"]]
+        client.post(f"/api/v1/runs/{run_id}/results", json={"results": [
+            {"item_id": i, "output": {"answer": "质量问题商家承担"}} for i in item_ids]})
+
+    def test_delete_done_run_cascades(self, client, eval_env):
+        env = eval_env
+        run = self._mk_run(client, env)
+        self._finish(client, env, run["id"])
+        r = client.delete(f"/api/v1/runs/{run['id']}")
+        assert r.status_code == 200
+        body = r.json()["data"]
+        assert body["deleted"] == [run["id"]] and body["results_removed"] == 2
+        assert client.get(f"/api/v1/runs/{run['id']}").status_code == 404
+
+    def test_delete_running_rejected_409(self, client, eval_env, session_factory):
+        from agenthub.db.models import EvalRun
+
+        env = eval_env
+        run = self._mk_run(client, env)
+        with session_factory() as db:
+            db.get(EvalRun, run["id"]).status = "running"
+            db.commit()
+        assert client.delete(f"/api/v1/runs/{run['id']}").status_code == 409
+        assert client.get(f"/api/v1/runs/{run['id']}").status_code == 200  # 未被删
+
+    def test_batch_delete_skips_running_and_dedups(self, client, eval_env, session_factory):
+        from agenthub.db.models import EvalRun
+
+        env = eval_env
+        done = self._mk_run(client, env)
+        self._finish(client, env, done["id"])
+        pending = self._mk_run(client, env)
+        running = self._mk_run(client, env)
+        with session_factory() as db:
+            db.get(EvalRun, running["id"]).status = "running"
+            db.commit()
+
+        r = client.post("/api/v1/runs/batch-delete", json={
+            "ids": [done["id"], running["id"], done["id"], pending["id"]],  # 含重复
+        })
+        assert r.status_code == 200
+        body = r.json()["data"]
+        assert body["deleted"] == [done["id"], pending["id"]]
+        assert body["skipped_running"] == [running["id"]]
+        assert client.get(f"/api/v1/runs/{done['id']}").status_code == 404
+        assert client.get(f"/api/v1/runs/{running['id']}").status_code == 200
+
+
+    def test_cancel_flow(self, client, eval_env):
+        """取消：pending/running 可取消为终态；取消后回传/聚合/再取消均 409。"""
+        env = eval_env
+        run = self._mk_run(client, env)
+        item_ids = [r["id"] for r in client.get(
+            f"/api/v1/datasets/{env['ds']['id']}/items", params={"version": 1}).json()["data"]["items"]]
+
+        # 回传一条（run → running，部分结果）
+        client.post(f"/api/v1/runs/{run['id']}/results", json={"results": [
+            {"item_id": item_ids[0], "output": {"answer": "质量问题商家承担"}}]})
+
+        # 取消成功
+        assert client.post(f"/api/v1/runs/{run['id']}/cancel").status_code == 200
+        data = client.get(f"/api/v1/runs/{run['id']}").json()["data"]
+        assert data["status"] == "canceled"
+
+        # 取消后：再取消 / 回传 / finalize 均 409
+        assert client.post(f"/api/v1/runs/{run['id']}/cancel").status_code == 409
+        assert client.post(f"/api/v1/runs/{run['id']}/results", json={"results": [
+            {"item_id": item_ids[1], "output": {"answer": "48小时"}}]}).status_code == 409
+        assert client.post(f"/api/v1/runs/{run['id']}/finalize").status_code == 409
+        # 状态不被 finalize 竞态覆盖
+        assert client.get(f"/api/v1/runs/{run['id']}").json()["data"]["status"] == "canceled"
+
+    def test_cancel_done_rejected_409(self, client, eval_env):
+        env = eval_env
+        run = self._mk_run(client, env)
+        self._finish(client, env, run["id"])  # 收齐 → done
+        assert client.post(f"/api/v1/runs/{run['id']}/cancel").status_code == 409
+
+
 class TestEvalService:
     def test_evaluate_item_na_handling(self):
         specs = [
