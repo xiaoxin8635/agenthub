@@ -117,9 +117,39 @@ class TestJudge:
         assert ms.score == 0.9
         assert "北京是首都" in self.last_user and "标准答案" not in self.last_user
 
+    def test_faithfulness_output_source_uses_citations(self):
+        # context_source=output：参照取自回答携带的检索引用（dict 条目抽 content 字段）
+        out = {"answer": "北京", "context": {"citations": [
+            {"chunk_id": "c1", "content": "中国的首都是北京"},
+            {"chunk_id": "c2"},  # 无 content 的条目应被忽略
+        ]}}
+        ms = get_metric("judge:faithfulness").evaluate(
+            ITEM_QA, out, {"type": "judge:faithfulness", "context_source": "output"})
+        assert ms.score == 0.9
+        assert "中国的首都是北京" in self.last_user
+        assert "北京是首都" not in self.last_user  # item 预置片段不参与
+        assert "标准答案" not in self.last_user
+
     def test_custom_rubric(self):
         ms = ev("judge:custom", ITEM_QA, {"answer": "x"}, rubric="是否押韵")
         assert ms.score == 0.9 and "押韵" in self.last_user
+
+    def test_context_recall_scores_retrieval_coverage(self):
+        # 默认 context_source=output：用真实 citations 评"标准答案被切片覆盖的程度"
+        out = {"answer": "北京", "context": {"citations": [{"content": "北京是中国的首都"}]}}
+        ms = get_metric("judge:context_recall").evaluate(ITEM_QA, out, {"type": "judge:context_recall"})
+        assert ms.score == 0.9 and ms.passed is True
+        assert "标准答案" in self.last_user
+        assert "北京是中国的首都" in self.last_user
+        assert "北京是首都" not in self.last_user  # 预置片段不参与
+
+    def test_context_precision_judges_chunk_relevance(self):
+        # 精确率只看切片与问题的相关性，不给标准答案
+        out = {"answer": "随便", "context": {"citations": [{"content": "切片A"}]}}
+        ms = get_metric("judge:context_precision").evaluate(ITEM_QA, out, {"type": "judge:context_precision"})
+        assert ms.score == 0.9
+        assert "[切片1] 切片A" in self.last_user
+        assert "标准答案" not in self.last_user
 
     def test_threshold_override(self):
         ms = ev("judge:correctness", ITEM_QA, {"answer": "x"}, threshold=0.5, value=None) if False else \

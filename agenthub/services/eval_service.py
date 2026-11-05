@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from agenthub.db.models import Asset, DatasetItem, DatasetVersion, EvalResult, EvalRun
 from agenthub.metrics import MetricError, get_metric
+from agenthub.metrics.turn_eval import evaluate_with_turn_scope
 
 
 def evaluate_item(metric_specs: list[dict], item: dict, output: dict) -> tuple[dict, bool | None, str]:
@@ -12,6 +13,7 @@ def evaluate_item(metric_specs: list[dict], item: dict, output: dict) -> tuple[d
 
     scores = {"<type>": {"score": x, "detail": str, "passed": bool|None}, ...}
     passed = 所有可判指标均通过（N/A 忽略）；全部 N/A → None。
+    spec.turn_scope 支持 multi_turn 逐轮评估（默认/last/each，见 metrics.turn_eval）。
     """
     scores: dict = {}
     passed_flags: list[bool] = []
@@ -19,7 +21,7 @@ def evaluate_item(metric_specs: list[dict], item: dict, output: dict) -> tuple[d
     for spec in metric_specs:
         mtype = spec.get("type", "")
         try:
-            ms = get_metric(mtype).evaluate(item, output, spec)
+            ms = evaluate_with_turn_scope(get_metric(mtype), item, output, spec)
             scores[mtype] = ms.as_dict()
             if ms.passed is not None:
                 passed_flags.append(ms.passed)
@@ -76,6 +78,9 @@ def compute_summary(metric_specs: list[dict], results: list[EvalResult]) -> dict
 
 def finalize_run(db: Session, run: EvalRun) -> EvalRun:
     """重算 summary 并落库（回传模式收齐 / 托管跑完时调用）。"""
+    db.refresh(run)
+    if run.status == "canceled":
+        return run  # 已被用户取消：保留终态，禁止后台线程聚合覆盖
     mc = run.metric_config
     results = db.query(EvalResult).filter(EvalResult.run_id == run.id).all()
     summary = compute_summary(mc.metrics if mc else [], results)

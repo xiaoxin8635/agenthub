@@ -42,6 +42,16 @@ app.dependency_overrides[get_db] = override_get_db
 HEADERS = {"X-API-Key": "test-key"}
 
 
+@pytest.fixture(autouse=True)
+def _isolated_llm_judge(monkeypatch):
+    """隔离 .env 的 LLM Judge 配置：单测不依赖外网 LLM（judge 指标应记 N/A）。"""
+    from agenthub.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "llm_base_url", "", raising=False)
+    monkeypatch.setattr(get_settings(), "llm_api_key", "", raising=False)
+    monkeypatch.setattr(get_settings(), "llm_model", "", raising=False)
+
+
 @pytest.fixture
 def client():
     # 每个测试前清空所有表
