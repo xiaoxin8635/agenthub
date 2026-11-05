@@ -1,6 +1,6 @@
 // AI 生成评测集弹窗：上传文档 → 后台 LLM 出题 → 代码去重 → 进度轮询 → 结果统计
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, InputNumber, Modal, Progress, Space, Statistic, Upload, message } from 'antd'
+import { Alert, Button, Input, InputNumber, Modal, Progress, Space, Statistic, Upload, message } from 'antd'
 import { CheckCircleOutlined, InboxOutlined, RobotOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import type { GenerateJob } from '../api/types'
@@ -16,6 +16,7 @@ export default function GenerateEvalsetModal({
 }) {
   const [file, setFile] = useState<File | null>(null)
   const [perChunk, setPerChunk] = useState(2)
+  const [sourceName, setSourceName] = useState('') // 自定义来源名（默认文件名去扩展名）
   const [job, setJob] = useState<GenerateJob | null>(null)
   const [busy, setBusy] = useState(false)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -45,6 +46,7 @@ export default function GenerateEvalsetModal({
 
   const close = () => {
     setFile(null)
+    setSourceName('')
     setJob(null)
     onClose()
   }
@@ -56,7 +58,7 @@ export default function GenerateEvalsetModal({
     }
     setBusy(true)
     try {
-      const r = await api.generateEvalset(file, perChunk)
+      const r = await api.generateEvalset(file, perChunk, sourceName.trim())
       setJob({ id: r.job_id, filename: file.name, status: 'running', done: 0, total: 0, generated: 0 })
     } catch {
       // 错误已 toast
@@ -100,9 +102,13 @@ export default function GenerateEvalsetModal({
             maxCount={1}
             beforeUpload={(f) => {
               setFile(f)
+              setSourceName(f.name.replace(/\.[^.]+$/, '')) // 默认来源名 = 文件名去扩展名
               return false
             }}
-            onRemove={() => setFile(null)}
+            onRemove={() => {
+              setFile(null)
+              setSourceName('')
+            }}
             fileList={file ? [file as unknown as never] : []}
           >
             <p className="ant-upload-drag-icon">
@@ -116,6 +122,16 @@ export default function GenerateEvalsetModal({
             <InputNumber min={1} max={5} value={perChunk} onChange={(v) => setPerChunk(v ?? 1)} />
             <span>条问答</span>
           </Space>
+          <div style={{ marginTop: 12 }}>
+            <div style={{ marginBottom: 4 }}>来源名称（大来源固定为「AI 生成」，此处为自定义子来源，便于区分不同文档/批次）</div>
+            <Input
+              value={sourceName}
+              onChange={(e) => setSourceName(e.target.value)}
+              placeholder="默认取文件名，可修改，如：EchoDesk实现方案"
+              maxLength={50}
+              allowClear
+            />
+          </div>
           <Alert
             style={{ marginTop: 16 }}
             type="info"

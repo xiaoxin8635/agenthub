@@ -69,16 +69,23 @@ def list_assets(
     tag: str | None = None,
     q: str | None = None,
     source: str | None = None,
+    source_name: str | None = None,
     offset: int = 0,
     limit: int = 50,
 ) -> tuple[int, list[Asset]]:
     query = db.query(Asset)
     if type:
         query = query.filter(Asset.type == type)
-    if source:
-        query = query.filter(Asset.source == source)
+    if source:  # 模糊包含匹配（支持输入片段，如 ai → ai_generated）
+        query = query.filter(Asset.source.like(f"%{source}%"))
     if tag:  # SQLite JSON 无原生查询，用 LIKE 匹配 tags 数组元素
         query = query.filter(cast(Asset.tags, Text).like(f'%"{tag}"%'))
+    if source_name:  # 对来源名值做子串模糊匹配（兼容不同 JSON 序列化空格风格）
+        patterns = [
+            f'%"source_name": "%{source_name}%"%',  # json.dumps 默认风格（冒号后带空格）
+            f'%"source_name":"%{source_name}%"%',  # 紧凑风格
+        ]
+        query = query.filter(or_(*[cast(Asset.meta, Text).like(p) for p in patterns]))
     if q:
         like = f"%{q}%"
         query = query.filter(or_(

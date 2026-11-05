@@ -143,7 +143,56 @@ def test_generate_api_full_flow(client, mock_chat, monkeypatch, session_factory)
     sample = next(i for i in items if i["content"]["input"]["question"] == "测试问题一：功能A如何开启？")
     assert sample["content"]["expected"]["keyword"] == "设置"
     assert sample["content"]["context"]["passages"], "来源片段应非空"
+    # passages 直接取自出题片段（逐片段出题出处已知，不再回猜）
+    assert sample["content"]["context"]["passages"][0] in generator.split_doc(doc)
     assert "测试手册.md" in sample["tags"]
+    # 默认来源名 = 文件名去扩展名（写入 meta.source_name + tags）
+    assert sample["meta"]["source_name"] == "测试手册"
+    assert "测试手册" in sample["tags"]
+    # 按 source_name 筛选
+    fr = client.get("/api/v1/assets", params={"source": "ai_generated", "source_name": "测试手册"})
+    assert fr.json()["data"]["total"] >= job["inserted"]
+    assert client.get(
+        "/api/v1/assets", params={"source": "ai_generated", "source_name": "不存在的来源"}
+    ).json()["data"]["total"] == 0
+
+
+def test_generate_custom_source_name(client, mock_chat, monkeypatch, session_factory):
+    """自定义来源名：写入 meta.source_name 与 tags，并可按其筛选。"""
+
+    class _S:
+        llm_base_url, llm_model = "http://mock", "mock-model"
+
+    monkeypatch.setattr("agenthub.routers.assets.get_settings", lambda: _S())
+    monkeypatch.setattr(generator, "SessionLocal", session_factory)
+    doc = "# 手册\n" + "足够长的正文内容用于切片，" * 30
+    files = {"file": ("doc.md", doc.encode(), "text/markdown")}
+    r = client.post("/api/v1/assets/generate", files=files, data={"per_chunk": "2", "source_name": "产品手册A"})
+    assert r.status_code == 200
+    job_id = r.json()["data"]["job_id"]
+
+    deadline = time.time() + 5
+    job = None
+    while time.time() < deadline:
+        jr = client.get(f"/api/v1/assets/generate/{job_id}")
+        job = jr.json()["data"]
+        if job["status"] != "running":
+            break
+        time.sleep(0.1)
+    assert job["status"] == "done", json.dumps(job, ensure_ascii=False)[:1200]
+    assert job["inserted"] > 0
+
+    ar = client.get("/api/v1/assets", params={"source": "ai_generated"})
+    sample = ar.json()["data"]["items"][0]
+    assert sample["meta"]["source_name"] == "产品手册A"
+    assert "产品手册A" in sample["tags"] and "doc.md" in sample["tags"]
+    fr = client.get("/api/v1/assets", params={"source": "ai_generated", "source_name": "产品手册A"})
+    assert fr.json()["data"]["total"] == job["inserted"]
+    # 模糊匹配：source 片段与 source_name 子串均可命中
+    assert client.get("/api/v1/assets", params={"source": "ai_gen"}).json()["data"]["total"] == job["inserted"]
+    assert client.get(
+        "/api/v1/assets", params={"source": "ai_generated", "source_name": "手册"}
+    ).json()["data"]["total"] == job["inserted"]
 
 
 def test_generate_rejects_short_doc(client, mock_chat):

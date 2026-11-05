@@ -27,7 +27,11 @@ router = APIRouter(prefix="/api/v1/assets", tags=["assets"])
 
 
 @router.post("/generate")
-async def generate_evalset(file: UploadFile, per_chunk: int = Form(1)):
+async def generate_evalset(
+    file: UploadFile,
+    per_chunk: int = Form(1),
+    source_name: str = Form(""),  # 自定义来源名；留空则取文件名去扩展名
+):
     """上传文档（md/txt），后台 LLM 出题生成 rag 评测资产（内置代码去重）。"""
     raw = (await file.read()).decode("utf-8", errors="replace")
     if len(raw.strip()) < 50:
@@ -37,7 +41,7 @@ async def generate_evalset(file: UploadFile, per_chunk: int = Form(1)):
         raise HTTPException(409, "LLM 未配置：需要 AGENTHUB_LLM_BASE_URL / AGENTHUB_LLM_MODEL")
     from agenthub.services import generator
 
-    job_id = generator.start_job(file.filename or "doc.md", raw, max(1, min(per_chunk, 5)))
+    job_id = generator.start_job(file.filename or "doc.md", raw, max(1, min(per_chunk, 5)), source_name)
     return ok({"job_id": job_id})
 
 
@@ -104,13 +108,16 @@ async def import_assets(
 def list_assets(
     type: str | None = None,
     source: str | None = None,
+    source_name: str | None = None,  # 子来源（AI 生成的自定义来源名，匹配 meta.source_name）
     tag: str | None = None,
     q: str | None = None,
     offset: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
 ):
-    total, rows = asset_service.list_assets(db, type=type, source=source, tag=tag, q=q, offset=offset, limit=limit)
+    total, rows = asset_service.list_assets(
+        db, type=type, source=source, source_name=source_name, tag=tag, q=q, offset=offset, limit=limit
+    )
     out = AssetListOut(total=total, items=[AssetOut.model_validate(r) for r in rows])
     return ok(out.model_dump(mode="json"))
 

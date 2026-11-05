@@ -172,19 +172,11 @@ def dedup_items(items: list[dict], fuzzy_threshold: float = 0.6) -> tuple[list[d
 JOBS: dict[str, dict] = {}  # 内存态 job；进程重启即失效（生成结果已落库，可接受）
 
 
-def _best_passage(question: str, chunks: list[str]) -> str:
-    """取与问题 3-gram 相似度最高的片段作为来源（供 faithfulness 引用）。"""
-    gq = _grams(_norm(question))
-    best, best_s = "", -1.0
-    for c in chunks:
-        s = _jaccard(gq, _grams(_norm(c[:1000])))
-        if s > best_s:
-            best, best_s = c, s
-    return best[:600]
-
-
-def _run_job(job_id: str, filename: str, text: str, per_chunk: int) -> None:
+def _run_job(job_id: str, filename: str, text: str, per_chunk: int, source_name: str = "") -> None:
     job = JOBS[job_id]
+    # 自定义来源名：默认取文件名去扩展名；同时写入 tags（可被标签筛选）与 meta.source_name
+    src = source_name.strip() or filename.rsplit(".", 1)[0]
+    tags = [filename] + ([src] if src != filename else [])
     try:
         chunks = split_doc(text)
         if not chunks:
@@ -193,7 +185,9 @@ def _run_job(job_id: str, filename: str, text: str, per_chunk: int) -> None:
         raw_items: list[dict] = []
         for i, chunk in enumerate(chunks):
             raw = _chat(_SYSTEM, f"资料片段（{i + 1}/{len(chunks)}）：\n{chunk}\n生成 {per_chunk} 条。", 0.7)
-            raw_items.extend(parse_items(raw))
+            for it in parse_items(raw):
+                it["_chunk"] = chunk  # 出题片段即来源片段（逐片段调用，出处已知，无需回猜）
+                raw_items.append(it)
             job["done"] = i + 1
             job["generated"] = len(raw_items)
 
@@ -203,7 +197,7 @@ def _run_job(job_id: str, filename: str, text: str, per_chunk: int) -> None:
         try:
             inserted = 0
             for it in kept:
-                passage = _best_passage(it["question"], chunks)
+                passage = it.get("_chunk", "")  # 出题时的来源片段（全文保留，约800字）
                 content = {
                     "input": {"question": it["question"]},
                     "expected": {"answer": it["answer"], "keyword": it["keyword"]},
@@ -219,8 +213,8 @@ def _run_job(job_id: str, filename: str, text: str, per_chunk: int) -> None:
                         source="ai_generated",
                         content=content,
                         content_hash=h,
-                        tags=[filename],
-                        meta={"generator": "llm", "question": it["question"]},
+                        tags=tags,
+                        meta={"generator": "llm", "question": it["question"], "source_name": src},
                     )
                 )
                 inserted += 1
@@ -233,8 +227,8 @@ def _run_job(job_id: str, filename: str, text: str, per_chunk: int) -> None:
         job.update(status="error", error=str(e), trace=traceback.format_exc()[-800:])
 
 
-def start_job(filename: str, text: str, per_chunk: int) -> str:
+def start_job(filename: str, text: str, per_chunk: int, source_name: str = "") -> str:
     job_id = uuid.uuid4().hex[:16]
     JOBS[job_id] = {"id": job_id, "filename": filename, "status": "running", "done": 0, "total": 0, "generated": 0}
-    threading.Thread(target=_run_job, args=(job_id, filename, text, per_chunk), daemon=True).start()
+    threading.Thread(target=_run_job, args=(job_id, filename, text, per_chunk, source_name), daemon=True).start()
     return job_id

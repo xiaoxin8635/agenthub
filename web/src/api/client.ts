@@ -92,6 +92,7 @@ export const api = {
   assets: (params: {
     type?: string
     source?: string
+    source_name?: string
     tag?: string
     q?: string
     offset?: number
@@ -117,10 +118,11 @@ export const api = {
     fd.append('tags', tags.join(','))
     return request<ImportResult>('/assets/import', { method: 'POST', body: fd })
   },
-  generateEvalset: (file: File, perChunk: number) => {
+  generateEvalset: (file: File, perChunk: number, sourceName: string) => {
     const fd = new FormData()
     fd.append('file', file)
     fd.append('per_chunk', String(perChunk))
+    fd.append('source_name', sourceName)
     return request<{ job_id: string }>('/assets/generate', { method: 'POST', body: fd })
   },
   generateJob: (id: string) => request<GenerateJob>(`/assets/generate/${id}`),
