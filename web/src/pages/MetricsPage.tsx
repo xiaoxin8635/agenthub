@@ -39,7 +39,13 @@ const METRIC_ZH: Record<string, { zh: string; tip: string }> = {
   'rule:custom': { zh: '自定义规则', tip: '组合多种检测：关键词组 / 长度区间 / 正则 / 数值容差 / 结构校验' },
   'judge:correctness': { zh: '正确性评审（LLM）', tip: 'LLM 对照标准答案给 0~1 分并说明理由，适合开放性问答' },
   'judge:faithfulness': { zh: '忠实度评审（LLM）', tip: '检查回答是否忠于参考资料、有没有编造，RAG 防幻觉必备' },
+  'judge:context_recall': { zh: '检索召回评分（LLM）', tip: '标准答案的信息被检索到的切片覆盖了多少——低分说明"没检到"，RAG 检索质量核心指标' },
+  'judge:context_precision': { zh: '检索精确评分（LLM）', tip: '检回的切片有多少真的与问题相关——低分说明"检回来一堆没用的"，RAGAS precision@k 简化版' },
   'judge:custom': { zh: '自定义评审（LLM）', tip: 'LLM 按你写的评分细则打分，如简洁度、语气、是否夹带推广' },
+  'traj:tools_called': { zh: '工具调用约束', tip: '检查 Agent 是否调用了必须的工具、没碰禁用的工具（取数据集 expected 的 must_call/must_not_call 字段），调了禁用工具直接 0 分' },
+  'traj:max_steps': { zh: '步数上限', tip: '工具调用次数不得超过上限（默认取数据集 context.max_steps），防止 Agent 绕圈空转' },
+  'traj:tool_args': { zh: '工具参数校验', tip: '对指定工具的调用参数做 JSON Schema 校验，确认"调对了工具且参数格式正确"；未调用该工具记 N/A' },
+  'judge:trajectory': { zh: '轨迹评审（LLM）', tip: 'LLM 看完整执行轨迹，评工具选择是否合理、路径是否高效、是否达成预期结果，适合开放性任务' },
 }
 
 // 下拉选项：中文名 + 类型名 + 一句话说明（两行渲染，支持中文搜索）
@@ -84,6 +90,26 @@ const ACTUAL_FIELD: Field = {
   placeholder: '默认 answer',
 }
 
+/** 轨迹类指标（traj:* / judge:trajectory）行首字段：trajectory_path 替代 actual */
+const TRAJECTORY_FIELD: Field = {
+  key: 'trajectory_path',
+  label: '轨迹路径 trajectory_path',
+  widget: 'text',
+  placeholder: '默认 trajectory',
+}
+
+/** multi_turn 场景专用：评估范围（仅评最后一轮 / 逐轮评估取均值） */
+const TURN_SCOPE_FIELD: Field = {
+  key: 'turn_scope',
+  label: '评估范围 turn_scope',
+  widget: 'select',
+  options: [
+    { value: 'last', label: '仅评最后一轮（默认，最后一轮问题+final_answer 自动映射）' },
+    { value: 'each', label: '逐轮评估取均值（要求输出带逐轮回答结构）' },
+  ],
+  help: '逐轮模式按 user 问题与逐轮回答配对评估，score=均值、全部轮通过才判过',
+}
+
 /** 各指标类型的专有参数（公共参数 actual/weight/threshold 在行内单独渲染） */
 const TYPE_FIELDS: Record<string, Field[]> = {
   'rule:exact': [
@@ -124,9 +150,61 @@ const TYPE_FIELDS: Record<string, Field[]> = {
     { key: 'expected_path', label: '标准答案路径', widget: 'text', placeholder: '默认 expected.answer' },
   ],
   'judge:faithfulness': [
-    { key: 'context_path', label: '参考资料路径', widget: 'text', placeholder: '默认 context.passages' },
+    {
+      key: 'context_source',
+      label: '判定参照',
+      widget: 'select',
+      options: [
+        { value: 'item', label: '评测集预置片段（context.passages）' },
+        { value: 'output', label: '回答携带的实际检索引用（context.citations，RAG 推荐）' },
+      ],
+      help: '选“实际检索引用”时以被评系统真实检索到的资料为基准，可区分检索不准与回答编造',
+    },
+    { key: 'context_path', label: '参考资料路径', widget: 'text', placeholder: '默认按判定参照自动取' },
+  ],
+  'judge:context_recall': [
+    {
+      key: 'context_source',
+      label: '检索切片来源',
+      widget: 'select',
+      options: [
+        { value: 'output', label: '回答携带的实际检索引用（context.citations，推荐）' },
+        { value: 'item', label: '评测集预置片段（context.passages）' },
+      ],
+      help: '默认用被评系统真实检回的切片，评"标准答案的信息有没有被检到"',
+    },
+    { key: 'expected_path', label: '标准答案路径', widget: 'text', placeholder: '默认 expected.answer' },
+  ],
+  'judge:context_precision': [
+    {
+      key: 'context_source',
+      label: '检索切片来源',
+      widget: 'select',
+      options: [
+        { value: 'output', label: '回答携带的实际检索引用（context.citations，推荐）' },
+        { value: 'item', label: '评测集预置片段（context.passages）' },
+      ],
+      help: '默认用被评系统真实检回的切片，评"检回的切片是否切题"',
+    },
   ],
   'judge:custom': [{ key: 'rubric', label: '评分细则 rubric', widget: 'textarea', required: true }],
+  'traj:tools_called': [
+    { key: 'must_call', label: '必须调用 must_call', widget: 'text', placeholder: '逗号分隔；留空取数据集 expected.must_call_tools', help: '与数据集字段二选一' },
+    { key: 'must_not_call', label: '禁止调用 must_not_call', widget: 'text', placeholder: '逗号分隔；留空取数据集 expected.must_not_call_tools', help: '与数据集字段二选一' },
+    { key: 'partial', label: '部分命中给分', widget: 'switch', help: '开启后按必须工具的命中比例给分（关闭时必须全部命中）' },
+  ],
+  'traj:max_steps': [
+    { key: 'max_steps', label: '步数上限 max_steps', widget: 'number', placeholder: '留空取数据集 context.max_steps（默认 10）' },
+  ],
+  'traj:tool_args': [
+    { key: 'tool', label: '工具名 tool', widget: 'text', required: true },
+    { key: 'schema', label: '参数 JSON Schema', widget: 'textarea', required: true, help: 'JSON 对象文本，校验该工具的调用参数' },
+  ],
+  'judge:trajectory': [
+    { key: 'task_path', label: '任务路径', widget: 'text', placeholder: '默认 input.task' },
+    { key: 'expected_path', label: '预期结果路径', widget: 'text', placeholder: '默认 expected.outcome' },
+    { key: 'rubric', label: '评分细则 rubric', widget: 'textarea', placeholder: '留空用内置细则（工具合理性/路径效率/结果达成）' },
+  ],
   'rule:custom': [
     {
       key: 'kind',
@@ -168,13 +246,18 @@ function rowToSpec(row: Record<string, unknown>): MetricSpec {
   const spec: MetricSpec = { type }
   if (row.weight != null) spec.weight = row.weight as number
   if (row.threshold != null) spec.threshold = row.threshold as number
+  // 行首公共字段（actual / trajectory_path / turn_scope）不经过 TYPE_FIELDS，需单独写入
+  for (const k of ['actual', 'trajectory_path', 'turn_scope'] as const) {
+    const v = row[k]
+    if (v !== undefined && v !== null && v !== '') spec[k] = v as string
+  }
   for (const f of TYPE_FIELDS[type] ?? []) {
     const v = row[f.key]
     if (v === undefined || v === null || v === '') continue
-    if (f.key === 'choices' || f.key === 'keywords')
+    if (['choices', 'keywords', 'must_call', 'must_not_call'].includes(f.key))
       spec[f.key] = String(v).split(/[,，]/).map((s) => s.trim()).filter(Boolean)
     else if (f.key === 'schema') spec.schema = JSON.parse(String(v))
-    else if (['abs_tolerance', 'rel_tolerance', 'min_len', 'max_len'].includes(f.key)) spec[f.key] = Number(v)
+    else if (['abs_tolerance', 'rel_tolerance', 'min_len', 'max_len', 'max_steps'].includes(f.key)) spec[f.key] = Number(v)
     else if (f.key === 'value') {
       const n = Number(v)
       spec.value = Number.isFinite(n) && String(v).trim() !== '' && /^-?\d+(\.\d+)?$/.test(String(v).trim()) ? n : v
@@ -188,7 +271,7 @@ function specToRow(s: MetricSpec): Record<string, unknown> {
   const row: Record<string, unknown> = { type: s.type, weight: s.weight ?? 1, threshold: s.threshold }
   for (const [k, v] of Object.entries(s)) {
     if (['type', 'weight', 'threshold'].includes(k)) continue
-    if (k === 'choices' || k === 'keywords') row[k] = (v as string[]).join(', ')
+    if (['choices', 'keywords', 'must_call', 'must_not_call'].includes(k)) row[k] = (v as string[]).join(', ')
     else if (k === 'schema') row[k] = JSON.stringify(v, null, 2)
     else row[k] = v
   }
@@ -209,6 +292,10 @@ function MetricRow({ name, metricInfos, onRemove }: {
   const allFields = TYPE_FIELDS[type ?? ''] ?? []
   // rule:custom 按所选 kind 过滤参数字段（kinds 未标注的字段恒显示）
   const extra = allFields.filter((f) => !f.kinds || !customKind || f.kinds.includes(customKind))
+  // 轨迹类指标行首渲染 trajectory_path（替代 actual——轨迹从 output.trajectory 取数）
+  const isTraj = type?.startsWith('traj:') || type === 'judge:trajectory'
+  // multi_turn 场景的指标行追加评估范围选择
+  const scene = Form.useWatch('scene', form) as string | undefined
 
   const renderField = (f: Field, prefix: (string | number)[] = []) => {
     const path = [...prefix, f.key]
@@ -260,6 +347,12 @@ function MetricRow({ name, metricInfos, onRemove }: {
                   .map((m) => metricOption(m)),
               },
               {
+                label: '轨迹类（Agent 工具调用检查，代码判定）',
+                options: metricInfos
+                  .filter((m) => m.kind === 'traj')
+                  .map((m) => metricOption(m)),
+              },
+              {
                 label: 'LLM 裁判（智能评审，消耗 Token）',
                 options: metricInfos
                   .filter((m) => m.kind === 'judge')
@@ -299,7 +392,8 @@ function MetricRow({ name, metricInfos, onRemove }: {
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0 12px' }}>
-        {renderField(ACTUAL_FIELD, [name])}
+        {renderField(isTraj ? TRAJECTORY_FIELD : ACTUAL_FIELD, [name])}
+        {scene === 'multi_turn' && renderField(TURN_SCOPE_FIELD, [name])}
         {extra.map((f) => renderField(f, [name]))}
       </div>
     </div>
@@ -606,7 +700,7 @@ export default function MetricsPage() {
               width: 200,
               render: (t: string, m) => (
                 <Space size={4}>
-                  <Tag color={t.startsWith('rule') ? 'cyan' : 'purple'}>{t}</Tag>
+                  <Tag color={t.startsWith('rule') ? 'cyan' : t.startsWith('traj') ? 'geekblue' : 'purple'}>{t}</Tag>
                   {m.builtin === false && <Tag color="orange">自定义</Tag>}
                 </Space>
               ),

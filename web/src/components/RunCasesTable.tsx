@@ -199,9 +199,9 @@ export default function RunCasesTable({
         loading={loading}
         dataSource={rows}
         columns={columns}
-        // 评测 case 可达数百上千条，虚拟滚动避免全量 DOM 渲染（UI-N2）
+        // 评测 case 可达数百上千条，虚拟滚动避免全量 DOM 渲染（UI-N2）；virtual 模式 scroll.x 必须为数字
         virtual
-        scroll={{ y: 560, x: 'max-content' }}
+        scroll={{ y: 560 }}
         expandable={{
           expandRowByClick: true,
           expandedRowRender: (r) => {

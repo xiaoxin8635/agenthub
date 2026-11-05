@@ -1,9 +1,10 @@
 ﻿// Run 详情（UI-403/404/405）：概览（指标卡+环形通过率+指标分布条形图+失败分布）
 // / 逐 case 结果 / 版本对比 三个 Tab；running 时 3s 轮询（页面不可见暂停）；回灌入口贯穿
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Alert, Card, Col, Progress, Row, Space, Spin, Statistic, Table, Tabs, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Col, Popconfirm, Progress, Row, Space, Spin, Table, Tabs, Tag, Typography, message } from 'antd'
+import { ArrowLeftOutlined } from '@ant-design/icons'
 import echarts from '../utils/echarts'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { useTheme } from '../theme'
 import type { DatasetItem, RunDetail as RunDetailType, RunSummaryData } from '../api/types'
@@ -11,6 +12,7 @@ import StatusBadge from '../components/StatusBadge'
 import RunCasesTable from '../components/RunCasesTable'
 import RunCompareTab from '../components/RunCompareTab'
 import FeedbackModal from '../components/FeedbackModal'
+import { HeroStat, StatTile, inkTokens } from '../components/statTiles'
 import { fmtTime, scoreTone, TONE_COLOR } from '../utils/format'
 
 /** 指标分布条形图（UI-403）：每指标 avg（×100）+ n，N/A 灰「—」 */
@@ -21,17 +23,20 @@ function MetricBarChart({ metrics }: { metrics: RunSummaryData['metrics'] }) {
 
   useEffect(() => {
     if (ref.current === null || entries.length === 0) return
-    const axisLabel = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)'
-    const splitLine = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'
+    const t = inkTokens(isDark)
     const chart = echarts.init(ref.current)
     const sorted = [...entries].sort((a, b) => (b[1].avg ?? 0) - (a[1].avg ?? 0))
     chart.setOption({
       animationDuration: 600,
       animationDurationUpdate: 300,
       animationEasing: 'cubicOut',
-      grid: { left: 130, right: 70, top: 10, bottom: 28 },
+      grid: { left: 156, right: 70, top: 10, bottom: 28 },
       tooltip: {
         trigger: 'item',
+        backgroundColor: t.tooltipBg,
+        borderColor: t.axis,
+        borderWidth: 1,
+        textStyle: { color: t.ink1, fontSize: 12 },
         formatter: (p: { dataIndex: number }) => {
           const [type, m] = sorted[p.dataIndex]
           return [
@@ -44,16 +49,17 @@ function MetricBarChart({ metrics }: { metrics: RunSummaryData['metrics'] }) {
             .join('<br/>')
         },
       },
-      xAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%', color: axisLabel }, splitLine: { lineStyle: { color: splitLine } } },
+      xAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%', color: t.ink3, fontSize: 11 }, splitLine: { lineStyle: { color: t.grid, type: 'solid' } } },
       yAxis: {
         type: 'category',
         data: sorted.map(([type]) => type),
-        axisLabel: { fontSize: 11, color: axisLabel },
+        axisLabel: { fontSize: 11, color: t.ink3 },
       },
       series: [
         {
           type: 'bar',
           barMaxWidth: 22,
+          emphasis: { itemStyle: { opacity: 0.8 } },
           label: {
             show: true,
             position: 'right',
@@ -61,8 +67,8 @@ function MetricBarChart({ metrics }: { metrics: RunSummaryData['metrics'] }) {
               const m = sorted[p.dataIndex][1]
               return m.avg == null ? '—' : `${(m.avg * 100).toFixed(1)}%`
             },
-            color: axisLabel,
-            fontFamily: 'monospace',
+            color: t.ink2,
+            fontSize: 12,
           },
           data: sorted.map(([, m]) => {
             if (m.avg == null) {
@@ -88,6 +94,7 @@ function MetricBarChart({ metrics }: { metrics: RunSummaryData['metrics'] }) {
 
 export default function RunDetail() {
   const { runId } = useParams<{ runId: string }>()
+  const nav = useNavigate()
   const [run, setRun] = useState<RunDetailType | null>(null)
   const [items, setItems] = useState<DatasetItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -111,6 +118,17 @@ export default function RunDetail() {
   useEffect(() => {
     void load()
   }, [load])
+
+  const doCancel = async () => {
+    if (!runId) return
+    try {
+      await api.cancelRun(runId)
+      message.success('评测已取消')
+      void load(true)
+    } catch {
+      // 错误已统一 toast
+    }
+  }
 
   // 快照 items：服务端已内联 dataset@version，仅需一次 items 拉取（版本不变不重拉）
   const dsId = run?.dataset?.id
@@ -151,7 +169,10 @@ export default function RunDetail() {
   if (loading || !run) {
     return (
       <div style={{ textAlign: 'center', padding: 80 }}>
-        <Spin tip="加载 Run 详情…" />
+        <Spin />
+        <Typography.Text type="secondary" style={{ display: 'block', marginTop: 12 }}>
+          加载 Run 详情…
+        </Typography.Text>
       </div>
     )
   }
@@ -169,10 +190,31 @@ export default function RunDetail() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
           <div>
             <Space size={12} wrap>
+              <Button
+                type="text"
+                size="small"
+                icon={<ArrowLeftOutlined />}
+                onClick={() => nav(-1)}
+              >
+                返回
+              </Button>
               <Typography.Title level={4} style={{ margin: 0 }} className="num">
                 Run {run.id.slice(0, 8)}
               </Typography.Title>
               <StatusBadge status={run.status} />
+              {(run.status === 'running' || run.status === 'pending') && (
+                <Popconfirm
+                  title="取消该评测？"
+                  description="停止等待执行/回传，状态置为「已取消」；已收到的结果保留但不再聚合。"
+                  okText="取消评测"
+                  cancelText="不取消"
+                  onConfirm={() => void doCancel()}
+                >
+                  <Button size="small" danger>
+                    取消评测
+                  </Button>
+                </Popconfirm>
+              )}
             </Space>
             <div style={{ marginTop: 8 }}>
               <Space size={8} wrap>
@@ -244,45 +286,33 @@ export default function RunDetail() {
               <div>
                 <Row gutter={[16, 16]}>
                   <Col xs={24} sm={12} lg={6}>
-                    <Card>
-                      <Statistic title="评测 case 总数" value={s.total} />
-                    </Card>
+                    <StatTile label="评测 case 总数" value={s.total} />
                   </Col>
                   <Col xs={24} sm={12} lg={6}>
-                    <Card>
-                      <Statistic title="通过 case" value={s.passed} suffix={`/ ${s.total}`} />
-                    </Card>
+                    <StatTile label="通过 case" value={s.passed} sub={`共 ${s.total} 条`} />
                   </Col>
                   <Col xs={24} sm={12} lg={6}>
-                    <Card>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                        <Progress
-                          type="circle"
-                          size={96}
-                          percent={s.pass_rate == null ? 0 : s.pass_rate * 100}
-                          strokeColor={s.pass_rate == null ? TONE_COLOR.na : TONE_COLOR[scoreTone(s.pass_rate)]}
-                          format={() =>
-                            s.pass_rate == null ? '—' : `${(s.pass_rate * 100).toFixed(1)}%`
-                          }
-                        />
-                        <div>
-                          <div style={{ color: 'rgba(0,0,0,.45)' }}>通过率</div>
-                          <div style={{ color: '#8c8c8c', fontSize: 12 }}>{s.passed} / {s.total} case 全指标通过</div>
-                        </div>
-                      </div>
-                    </Card>
+                    <HeroStat
+                      label="通过率（全指标通过）"
+                      value={s.pass_rate}
+                      digits={1}
+                      sub={`${s.passed} / ${s.total} case 全部指标通过`}
+                    />
                   </Col>
                   <Col xs={24} sm={12} lg={6}>
-                    <Card>
-                      <Statistic
-                        title="加权总分"
-                        value={s.weighted_total == null ? '—' : (s.weighted_total * 100).toFixed(1)}
-                        suffix={s.weighted_total == null ? undefined : '%'}
-                        valueStyle={{
-                          color: s.weighted_total == null ? TONE_COLOR.na : TONE_COLOR[scoreTone(s.weighted_total)],
-                        }}
-                      />
-                    </Card>
+                    <StatTile
+                      label="加权总分"
+                      value={
+                        s.weighted_total == null ? (
+                          '—'
+                        ) : (
+                          <span style={{ color: TONE_COLOR[scoreTone(s.weighted_total)] }}>
+                            {(s.weighted_total * 100).toFixed(1)}%
+                          </span>
+                        )
+                      }
+                      sub="Σ(指标得分 × 权重) ÷ Σ(权重)"
+                    />
                   </Col>
                 </Row>
 

@@ -1,21 +1,23 @@
 // 评测 Run 列表（UI-401）：状态/数据集/Target 筛选 + 通过率色条 + running 行 3s 轮询（页面不可见暂停）
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, Card, Empty, Progress, Select, Space, Table } from 'antd'
+import type { Key } from 'react'
+import { Button, Card, Empty, Popconfirm, Progress, Select, Space, Table, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { PlayCircleOutlined } from '@ant-design/icons'
+import { DeleteOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { DatasetBrief, EvalTarget, RunSummary } from '../api/types'
 import PassRate from '../components/PassRate'
 import StatusBadge from '../components/StatusBadge'
 import StartRunWizard from '../components/StartRunWizard'
-import { fmtPct, fmtTime } from '../utils/format'
+import { fmtPct, fmtTime, scoreTone, TONE_COLOR } from '../utils/format'
 
 const STATUS_OPTIONS = [
   { value: 'pending', label: '待执行' },
   { value: 'running', label: '运行中' },
   { value: 'done', label: '已完成' },
   { value: 'failed', label: '失败' },
+  { value: 'canceled', label: '已取消' },
 ]
 
 /** 执行中行内进度条（后端 run.progress 每 case 实时更新） */
@@ -41,6 +43,8 @@ export default function Runs() {
   const [datasets, setDatasets] = useState<DatasetBrief[]>([])
   const [targets, setTargets] = useState<EvalTarget[]>([])
   const [wizardOpen, setWizardOpen] = useState(false)
+  const [selected, setSelected] = useState<Key[]>([])
+  const [deleting, setDeleting] = useState(false)
   const nav = useNavigate()
 
   // 「用此版本发起评测」入口：/runs?dataset=<name>&vid=<versionId> → 自动打开向导并预选
@@ -68,6 +72,9 @@ export default function Runs() {
       const r = await api.runs({ status: f.status, dataset: f.dataset, target: f.target, limit: 100 })
       setRuns(r.items)
       setTotal(r.total)
+      // 清掉已不在列表中的选中项（被删/被筛掉）
+      const alive = new Set(r.items.map((i) => i.id))
+      setSelected((prev) => prev.filter((k) => alive.has(String(k))))
     } catch {
       // 错误已统一 toast；保留旧数据供重试
     } finally {
@@ -120,7 +127,11 @@ export default function Runs() {
       title: '加权总分',
       dataIndex: 'weighted_total',
       width: 100,
-      render: (v: number | null) => <span className="num">{fmtPct(v)}</span>,
+      render: (v: number | null) => (
+        <span className="num" style={{ color: v == null ? undefined : TONE_COLOR[scoreTone(v)] }}>
+          {fmtPct(v)}
+        </span>
+      ),
     },
     {
       title: '发起时间',
@@ -128,9 +139,102 @@ export default function Runs() {
       width: 150,
       render: (v: string) => <span className="num">{fmtTime(v)}</span>,
     },
+    {
+      title: '操作',
+      key: 'op',
+      width: 130,
+      render: (_, r) => {
+        if (r.status === 'running' || r.status === 'pending') {
+          return (
+            <Space size={0}>
+              <Popconfirm
+                title="取消该评测？"
+                description="停止等待执行/回传，状态置为「已取消」；已收到的结果保留但不再聚合。"
+                okText="取消评测"
+                cancelText="不取消"
+                onConfirm={(e) => {
+                  e?.stopPropagation()
+                  void doCancel(r.id)
+                }}
+                onCancel={(e) => e?.stopPropagation()}
+              >
+                <Button
+                  type="link"
+                  size="small"
+                  style={{ padding: 0 }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  取消
+                </Button>
+              </Popconfirm>
+              <span style={{ color: '#d9d9d9' }}>|</span>
+              <span style={{ color: '#bfbfbf', fontSize: 12, padding: '0 8px' }}>执行中</span>
+            </Space>
+          )
+        }
+        return (
+          <Popconfirm
+            title="删除该评测？"
+            description="将同时删除其全部逐 case 结果，不可恢复。"
+            okText="删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+            onConfirm={(e) => {
+              e?.stopPropagation()
+              void doDelete([r.id])
+            }}
+            onCancel={(e) => e?.stopPropagation()}
+          >
+            <Button
+              type="link"
+              danger
+              size="small"
+              icon={<DeleteOutlined />}
+              style={{ padding: 0 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              删除
+            </Button>
+          </Popconfirm>
+        )
+      },
+    },
   ]
 
   const hasFilter = !!(status || dataset || target)
+
+  // ---------- 取消（pending/running → canceled 终态） ----------
+  const doCancel = async (runId: string) => {
+    try {
+      await api.cancelRun(runId)
+      message.success('评测已取消')
+      void load(true)
+    } catch {
+      // 错误已 toast
+    }
+  }
+
+  // ---------- 删除（单个 / 批量；running 由后端拒绝并跳过） ----------
+  const selectedRunning = selected.filter((k) => runs.find((r) => r.id === String(k))?.status === 'running').length
+
+  const doDelete = async (ids: string[]) => {
+    setDeleting(true)
+    try {
+      const r = ids.length === 1
+        ? await api.deleteRun(ids[0])
+        : await api.deleteRunsBatch(ids)
+      const n = r.deleted.length
+      const skip = r.skipped_running.length
+      if (n) message.success(`已删除 ${n} 个评测${skip ? `，跳过执行中 ${skip} 个` : ''}`)
+      else if (skip) message.warning('执行中的评测不能删除，已全部跳过')
+      setSelected((prev) => prev.filter((k) => !r.deleted.includes(String(k))))
+      void load(true)
+    } catch {
+      // 错误已 toast
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   return (
     <div>
@@ -161,6 +265,24 @@ export default function Runs() {
               onChange={setTarget}
               options={targets.map((t) => ({ value: t.name, label: t.name }))}
             />
+            {selected.length > 0 && (
+              <Popconfirm
+                title={`删除选中的 ${selected.length} 个评测？`}
+                description={
+                  selectedRunning > 0
+                    ? `其中 ${selectedRunning} 个正在执行将被跳过，其余的逐 case 结果会一并删除，不可恢复。`
+                    : '将同时删除全部逐 case 结果，不可恢复。'
+                }
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                onConfirm={() => void doDelete(selected.map(String))}
+              >
+                <Button danger icon={<DeleteOutlined />} loading={deleting}>
+                  删除选中（{selected.length}）
+                </Button>
+              </Popconfirm>
+            )}
           </Space>
           <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => setWizardOpen(true)}>
             发起评测
@@ -172,6 +294,11 @@ export default function Runs() {
           loading={loading}
           dataSource={runs}
           columns={columns}
+          rowSelection={{
+            selectedRowKeys: selected,
+            onChange: (keys) => setSelected(keys),
+            selections: [Table.SELECTION_ALL, Table.SELECTION_INVERT, Table.SELECTION_NONE],
+          }}
           locale={{
             emptyText: hasFilter ? (
               '没有符合筛选条件的 Run'
@@ -196,7 +323,11 @@ export default function Runs() {
           }}
           onRow={(r) => ({
             style: { cursor: 'pointer' },
-            onClick: () => nav(`/runs/${r.id}`),
+            onClick: (e) => {
+              // 复选框列点击不触发行跳转（避免勾选时误入详情）
+              if ((e.target as HTMLElement).closest('.ant-table-selection-column')) return
+              nav(`/runs/${r.id}`)
+            },
           })}
         />
       </Card>

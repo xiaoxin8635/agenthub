@@ -18,6 +18,8 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // 禁缓存：dev server 全部响应带 no-store，杜绝浏览器拿到旧模块（页面缺新功能/缺字段渲染）
+    headers: { 'Cache-Control': 'no-store' },
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8300',

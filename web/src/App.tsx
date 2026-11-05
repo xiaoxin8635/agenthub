@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect } from 'react'
-import { App as AntApp, Spin } from 'antd'
+import { App as AntApp, Spin, Typography } from 'antd'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { setNotifier } from './api/client'
 import MainLayout from './layouts/MainLayout'
@@ -27,7 +27,10 @@ export function Bridge() {
 function PageFallback() {
   return (
     <div style={{ textAlign: 'center', padding: 120 }}>
-      <Spin tip="页面加载中…" />
+      <Spin />
+      <Typography.Text type="secondary" style={{ display: 'block', marginTop: 12, fontSize: 13 }}>
+        页面加载中…
+      </Typography.Text>
     </div>
   )
 }

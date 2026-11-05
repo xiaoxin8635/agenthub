@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Alert,
+  AutoComplete,
   Button,
   Divider,
   Drawer,
@@ -48,6 +49,7 @@ const PAGE_SIZE = 20
 interface Filters {
   type?: string
   source?: string
+  source_name?: string
   tag?: string
   q?: string
   offset: number
@@ -60,6 +62,7 @@ export default function Assets() {
   const [qInput, setQInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([])
+  const [srcText, setSrcText] = useState('') // 来源输入框文本（选中/回车/失焦才应用为筛选）
 
   const [importOpen, setImportOpen] = useState(false)
   const [genOpen, setGenOpen] = useState(false)
@@ -98,6 +101,11 @@ export default function Assets() {
   useEffect(() => {
     void load(filters)
   }, [filters, load])
+
+  // 已应用的来源筛选变化（含外部跳转）时同步输入框文本
+  useEffect(() => {
+    setSrcText(filters.source ?? '')
+  }, [filters.source])
 
   // 关键词防抖 300ms（UI-201）
   useEffect(() => {
@@ -156,6 +164,17 @@ export default function Assets() {
     }
   }
 
+  // 跨页全选：按当前筛选条件拉全量 id 填入勾选框
+  const selectAllFiltered = async () => {
+    try {
+      const r = await api.assets({ ...filters, limit: 1000 })
+      setSelectedKeys(r.items.map((i) => i.id))
+      if (r.total > 1000) message.info(`共 ${r.total} 条，已勾选前 1000 条`)
+    } catch {
+      // 错误已 toast
+    }
+  }
+
   return (
     <div>
       {/* UI-201 筛选器置顶 */}
@@ -168,14 +187,45 @@ export default function Assets() {
           value={filters.type}
           onChange={(v) => patch({ type: v })}
         />
-        <Select
-          placeholder="来源"
+        <AutoComplete
+          placeholder="来源（可输入/模糊）"
           allowClear
-          style={{ width: 150 }}
+          style={{ width: 170 }}
           options={SOURCE_OPTIONS}
-          value={filters.source}
-          onChange={(v) => patch({ source: v })}
+          value={srcText}
+          onChange={(v) => {
+            setSrcText(v)
+            if (v === '') patch({ source: undefined }) // 清空立即生效
+          }}
+          onSelect={(v: string) => {
+            setSrcText(v)
+            patch({ source: v })
+          }}
+          onBlur={() => {
+            // 自由输入在失焦时生效（与已应用值不同才触发）
+            if ((srcText || '') !== (filters.source ?? '')) patch({ source: srcText || undefined })
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (srcText || '') !== (filters.source ?? '')) patch({ source: srcText || undefined })
+          }}
+          filterOption={(input, option) => {
+            // 模糊：值或中文标签任一包含即命中
+            const k = input.toLowerCase()
+            return (
+              String(option?.value ?? '').toLowerCase().includes(k) ||
+              String(option?.label ?? '').toLowerCase().includes(k)
+            )
+          }}
         />
+        {filters.source === 'ai_generated' && (
+          <Input
+            placeholder="按来源名筛选"
+            allowClear
+            style={{ width: 170 }}
+            value={filters.source_name}
+            onChange={(e) => patch({ source_name: e.target.value || undefined })}
+          />
+        )}
         <Input
           placeholder="按标签筛选"
           allowClear
@@ -209,6 +259,11 @@ export default function Assets() {
           message={`已勾选 ${selectedKeys.length} 条资产`}
           action={
             <Space>
+              {total > selectedKeys.length && (
+                <Button size="small" onClick={() => void selectAllFiltered()}>
+                  全选所有 {total} 条
+                </Button>
+              )}
               <Button type="primary" size="small" onClick={() => setBatchOpen(true)}>
                 加入数据集…
               </Button>
@@ -238,7 +293,7 @@ export default function Assets() {
         dataSource={items}
         locale={{
           emptyText:
-            !filters.type && !filters.source && !filters.tag && !filters.q ? (
+            !filters.type && !filters.source && !filters.source_name && !filters.tag && !filters.q ? (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有数据资产" style={{ padding: '32px 0' }}>
                 <Space direction="vertical" size={8}>
                   <Button type="primary" icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
@@ -254,6 +309,14 @@ export default function Assets() {
             ),
         }}
         rowSelection={{ selectedRowKeys: selectedKeys, onChange: setSelectedKeys }}
+        onRow={(a) => ({
+          style: { cursor: 'pointer' },
+          onClick: (e) => {
+            // 复选框列与操作按钮/链接点击不触发行打开（避免误开抽屉）
+            if ((e.target as HTMLElement).closest('.ant-table-selection-column, button, a')) return
+            void openDetail(a)
+          },
+        })}
         pagination={{
           current: filters.offset / PAGE_SIZE + 1,
           pageSize: PAGE_SIZE,
@@ -264,7 +327,24 @@ export default function Assets() {
         }}
         columns={[
           { title: '类型', dataIndex: 'type', width: 100, render: (t: string) => <TypeTag type={t} /> },
-          { title: '来源', dataIndex: 'source', width: 130, render: (s: string) => <SourceTag source={s} /> },
+          {
+            title: '来源',
+            dataIndex: 'source',
+            width: 210,
+            render: (_, a) => {
+              const sn = typeof a.meta?.source_name === 'string' ? (a.meta.source_name as string) : ''
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  <SourceTag source={a.source} />
+                  {sn && (
+                    <Typography.Text type="secondary" ellipsis={{ tooltip: sn }} style={{ maxWidth: 110 }}>
+                      · {sn}
+                    </Typography.Text>
+                  )}
+                </div>
+              )
+            },
+          },
           {
             title: '内容摘要',
             dataIndex: 'content',
